@@ -1,0 +1,13 @@
+# Compiler and linker outputs
+*.o
+*.a
+*.so
+
+# Locally built test/example executables
+/example/spdlog/log-test.
+/test/util/util_test
+
+# Runtime-generated configuration and logs
+/settings.path
+*.log
+*.dat

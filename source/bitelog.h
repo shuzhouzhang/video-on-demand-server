@@ -33,8 +33,8 @@ namespace bitelog {
     extern void bitelog_init(const Logsettings &settings);
     //7.封装日志输出宏
     #define FMT_PREFIX "[{}:{}]:"//日志输出格式前缀，包含文件名和行号
-    #define DBG(fmt, ...) bitelog::g_logger->debug(FMT_PREFIX fmt,__FILE__,__LINE__ ##__VA_ARGS__)
-    #define INF(fmt, ...) bitelog::g_logger->info(FMT_PREFIX fmt,__FILE__,__LINE__ ##__VA_ARGS__)
-    #define WRN(fmt, ...) bitelog::g_logger->warn(FMT_PREFIX fmt,__FILE__,__LINE__ ##__VA_ARGS__)
-    #define ERR(fmt, ...) bitelog::g_logger->error(FMT_PREFIX fmt,__FILE__,__LINE__ ##__VA_ARGS__)
+    #define DBG(fmt, ...) bitelog::g_logger->debug(FMT_PREFIX fmt,__FILE__,__LINE__ ,##__VA_ARGS__)
+    #define INF(fmt, ...) bitelog::g_logger->info(FMT_PREFIX fmt,__FILE__,__LINE__ ,##__VA_ARGS__)
+    #define WRN(fmt, ...) bitelog::g_logger->warn(FMT_PREFIX fmt,__FILE__,__LINE__ ,##__VA_ARGS__)
+    #define ERR(fmt, ...) bitelog::g_logger->error(FMT_PREFIX fmt,__FILE__,__LINE__ ,##__VA_ARGS__)
 } // namespace bitelog

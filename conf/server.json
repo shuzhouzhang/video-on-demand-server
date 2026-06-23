@@ -1,0 +1,11 @@
+{
+  "server": {
+    "port": 9000
+  },
+  "log": {
+    "async": false,
+    "level": 1,
+    "pattern": "[%H:%M:%S] [%-7l] %v",
+    "path": "stdout"
+  }
+}

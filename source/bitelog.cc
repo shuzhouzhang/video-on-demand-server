@@ -10,7 +10,7 @@ namespace bitelog {
             }
             else
             {
-                g_logger = spdlog::basic_logger_mt<spdlog::async_factory>("file_logger", "settings.path");
+                g_logger = spdlog::basic_logger_mt<spdlog::async_factory>("file_logger", settings.path);
             }
         }
         else {
@@ -19,7 +19,7 @@ namespace bitelog {
             }
             else
             {
-                g_logger = spdlog::basic_logger_mt("file_logger", "settings.path");
+                g_logger = spdlog::basic_logger_mt("file_logger", settings.path);
             }
         }
         //2.判断输出目标stdout, file, 

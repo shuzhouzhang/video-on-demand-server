@@ -6,6 +6,7 @@
 # Locally built test/example executables
 /example/spdlog/log-test.
 /test/util/util_test
+/test/config/config_test
 
 # Runtime-generated configuration and logs
 /settings.path

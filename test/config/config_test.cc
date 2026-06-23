@@ -31,6 +31,13 @@ int main() {
             "level": 1,
             "pattern": "[%H:%M:%S] %v",
             "path": "/tmp/video_server_config_test.log"
+        },
+        "database": {
+            "host": "127.0.0.1",
+            "port": 3306,
+            "user": "video_app",
+            "password": "",
+            "name": "video_on_demand"
         }
     })";
     ok &= expect(biteutil::FUTIL::write(filename, valid),
@@ -41,6 +48,9 @@ int main() {
     ok &= expect(settings && !settings->log.async &&
                      settings->log.path == logFilename,
                  "load log settings");
+    ok &= expect(settings && settings->database.port == 3306 &&
+                     settings->database.name == "video_on_demand",
+                 "load database settings");
     if (settings) {
         bitelog::bitelog_init(settings->log);
         INF("{}", "configuration integration test");
@@ -64,6 +74,13 @@ int main() {
             "level": 1,
             "pattern": "%v",
             "path": "stdout"
+        },
+        "database": {
+            "host": "127.0.0.1",
+            "port": 3306,
+            "user": "video_app",
+            "password": "",
+            "name": "video_on_demand"
         }
     })";
     ok &= expect(biteutil::FUTIL::write(filename, invalidPort),

@@ -24,8 +24,9 @@ std::optional<AppSettings> Config::load(const std::string& filename,
 
     const Json::Value& server = (*root)["server"];
     const Json::Value& log = (*root)["log"];
-    if (!server.isObject() || !log.isObject()) {
-        error = "配置必须包含 server 和 log 对象";
+    const Json::Value& database = (*root)["database"];
+    if (!server.isObject() || !log.isObject() || !database.isObject()) {
+        error = "配置必须包含 server、log 和 database 对象";
         return std::nullopt;
     }
 
@@ -54,10 +55,40 @@ std::optional<AppSettings> Config::load(const std::string& filename,
         return std::nullopt;
     }
 
+    if (!database["host"].isString() ||
+        database["host"].asString().empty()) {
+        error = "database.host 必须是非空字符串";
+        return std::nullopt;
+    }
+    if (!database["port"].isInt() || database["port"].asInt() < 1 ||
+        database["port"].asInt() >
+            std::numeric_limits<std::uint16_t>::max()) {
+        error = "database.port 必须是 1 到 65535 之间的整数";
+        return std::nullopt;
+    }
+    if (!database["user"].isString() ||
+        database["user"].asString().empty()) {
+        error = "database.user 必须是非空字符串";
+        return std::nullopt;
+    }
+    if (!database["password"].isString()) {
+        error = "database.password 必须是字符串";
+        return std::nullopt;
+    }
+    if (!database["name"].isString() ||
+        database["name"].asString().empty()) {
+        error = "database.name 必须是非空字符串";
+        return std::nullopt;
+    }
+
     AppSettings settings{
         {static_cast<std::uint16_t>(port.asInt())},
         {log["async"].asBool(), log["level"].asInt(),
-         log["pattern"].asString(), log["path"].asString()}};
+         log["pattern"].asString(), log["path"].asString()},
+        {database["host"].asString(),
+         static_cast<std::uint16_t>(database["port"].asInt()),
+         database["user"].asString(), database["password"].asString(),
+         database["name"].asString()}};
     return settings;
 }
 

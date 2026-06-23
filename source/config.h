@@ -15,9 +15,18 @@ struct ServerSettings {
     std::uint16_t port;
 };
 
+struct DatabaseSettings {
+    std::string host;
+    std::uint16_t port;
+    std::string user;
+    std::string password;
+    std::string name;
+};
+
 struct AppSettings {
     ServerSettings server;
     bitelog::Logsettings log;
+    DatabaseSettings database;
 };
 
 class Config {

@@ -1,4 +1,5 @@
 #include "config.h"
+#include "database.h"
 #include "http_server.h"
 
 #include <iostream>
@@ -14,6 +15,13 @@ int main(int argc, char* argv[]) {
     }
 
     bitelog::bitelog_init(settings->log);
+
+    bitedb::Database database;
+    if (!database.connect(settings->database, error)) {
+        ERR("{}", error);
+        return 1;
+    }
+    INF("{}", "MySQL connection is healthy");
     INF("HTTP server listening on 0.0.0.0:{}", settings->server.port);
 
     biteserver::HttpServer server;

@@ -28,6 +28,10 @@ make clean
 
 ```bash
 make server
-./video_server conf/server.json
+cp conf/server.json conf/server.local.json
+# 在 server.local.json 中填写本地数据库连接信息。
+./video_server conf/server.local.json
 curl http://127.0.0.1:9000/health
 ```
+
+`conf/server.local.json`包含本地凭据并已被 Git 忽略，不要将真实密码写入已跟踪的配置文件。

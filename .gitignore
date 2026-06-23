@@ -13,5 +13,6 @@
 
 # Runtime-generated configuration and logs
 /settings.path
+/conf/server.local.json
 *.log
 *.dat

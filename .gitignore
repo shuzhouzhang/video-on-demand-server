@@ -7,6 +7,8 @@
 /example/spdlog/log-test.
 /test/util/util_test
 /test/config/config_test
+/test/http/http_server_test
+/video_server
 
 # Runtime-generated configuration and logs
 /settings.path

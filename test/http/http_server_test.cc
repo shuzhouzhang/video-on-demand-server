@@ -16,11 +16,24 @@ bool expect(bool condition, const std::string& message) {
     return true;
 }
 
+class FakeVideoStore : public bitevideo::VideoStore {
+public:
+    bool list(std::vector<bitevideo::Video>& videos,
+              std::string& error) override {
+        error.clear();
+        videos = {{"video-001", "测试视频", "测试用户", "6-23", 558,
+                   "36000", "256", "科技", {"编程开发", "软件工具"},
+                   "HTTP测试数据"}};
+        return true;
+    }
+};
+
 }  // namespace
 
 int main() {
     bool ok = true;
-    biteserver::HttpServer server;
+    FakeVideoStore videoStore;
+    biteserver::HttpServer server(videoStore);
     const int port = server.bindToAnyPort("127.0.0.1");
     ok &= expect(port > 0, "bind an available local port");
     if (port <= 0) {
@@ -48,6 +61,19 @@ int main() {
     const auto missing = client.Get("/missing");
     ok &= expect(missing && missing->status == 404,
                  "unknown route returns HTTP 404");
+
+    const auto videos = client.Get("/videos");
+    ok &= expect(videos && videos->status == 200,
+                 "GET /videos returns HTTP 200");
+    if (videos) {
+        const auto body = biteutil::JSON::unserialize(videos->body);
+        ok &= expect(body && body->isArray() && body->size() == 1,
+                     "GET /videos returns a JSON array");
+        ok &= expect(body && (*body)[0]["id"].asString() == "video-001" &&
+                         (*body)[0]["duration"].asString() == "09:18" &&
+                         (*body)[0]["tags"].isArray(),
+                     "GET /videos matches the client contract");
+    }
 
     server.stop();
     serverThread.join();

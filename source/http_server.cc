@@ -1,10 +1,12 @@
 #include "http_server.h"
 
+#include "bitelog.h"
 #include "util.h"
 
 namespace biteserver {
 
-HttpServer::HttpServer() {
+HttpServer::HttpServer(bitevideo::VideoStore& videoStore)
+    : videoStore_(videoStore) {
     registerRoutes();
 }
 
@@ -26,6 +28,35 @@ void HttpServer::registerRoutes() {
 
         response.status = 200;
         response.set_content(*json, "application/json");
+    });
+
+    server_.Get("/videos", [this](const httplib::Request&,
+                                  httplib::Response& response) {
+        std::vector<bitevideo::Video> videos;
+        std::string error;
+        if (!videoStore_.list(videos, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /videos failed: {}", error);
+            }
+            Json::Value body;
+            body["success"] = false;
+            body["message"] = "视频列表暂时不可用";
+            response.status = 500;
+            response.set_content(
+                biteutil::JSON::serialize(body).value_or(
+                    R"({"success":false,"message":"database error"})"),
+                "application/json; charset=utf-8");
+            return;
+        }
+
+        Json::Value body(Json::arrayValue);
+        for (const bitevideo::Video& video : videos) {
+            body.append(bitevideo::toJson(video));
+        }
+        response.status = 200;
+        response.set_content(
+            biteutil::JSON::serialize(body).value_or("[]"),
+            "application/json; charset=utf-8");
     });
 }
 

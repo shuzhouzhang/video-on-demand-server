@@ -10,6 +10,7 @@
 /test/http/http_server_test
 /test/database/database_test
 /video_server
+/database_migrate
 
 # Runtime-generated configuration and logs
 /settings.path

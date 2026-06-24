@@ -3,6 +3,8 @@
  */
 #pragma once
 
+#include "video_repository.h"
+
 #include <cstdint>
 #include <string>
 
@@ -12,7 +14,7 @@ namespace biteserver {
 
 class HttpServer {
 public:
-    HttpServer();
+    explicit HttpServer(bitevideo::VideoStore& videoStore);
 
     // 正式运行入口；成功监听后会阻塞，直到服务被停止。
     bool listen(const std::string& host, std::uint16_t port);
@@ -26,6 +28,7 @@ private:
     void registerRoutes();
 
     httplib::Server server_;
+    bitevideo::VideoStore& videoStore_;
 };
 
 }  // namespace biteserver

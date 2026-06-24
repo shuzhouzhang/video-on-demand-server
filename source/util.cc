@@ -30,6 +30,7 @@ std::mt19937& randomEngine() {
 std::optional<std::string> JSON::serialize(const Json::Value& value,
                                            bool styled) {
     Json::StreamWriterBuilder builder;
+    builder["emitUTF8"] = true;
     if (!styled) {
         builder["indentation"] = "";
     }

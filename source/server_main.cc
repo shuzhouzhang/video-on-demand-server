@@ -1,6 +1,7 @@
 #include "config.h"
 #include "database.h"
 #include "http_server.h"
+#include "video_repository.h"
 
 #include <iostream>
 #include <string>
@@ -24,7 +25,8 @@ int main(int argc, char* argv[]) {
     INF("{}", "MySQL connection is healthy");
     INF("HTTP server listening on 0.0.0.0:{}", settings->server.port);
 
-    biteserver::HttpServer server;
+    bitevideo::MySqlVideoRepository videos(database);
+    biteserver::HttpServer server(videos);
     if (!server.listen("0.0.0.0", settings->server.port)) {
         ERR("HTTP server failed to listen on port {}", settings->server.port);
         return 1;

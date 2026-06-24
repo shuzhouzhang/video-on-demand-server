@@ -1,9 +1,15 @@
-.PHONY: server test clean
+.PHONY: server migrate test clean
 
 server: source/server_main.cc source/http_server.cc source/config.cc \
-		source/database.cc \
+		source/database.cc source/video.cc source/video_repository.cc \
 		source/util.cc source/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_server \
+		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \
+		-lmysqlclient -pthread
+
+migrate: source/migrate_main.cc source/config.cc source/database.cc \
+		source/util.cc source/bitelog.cc
+	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o database_migrate \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \
 		-lmysqlclient -pthread
 
@@ -22,3 +28,4 @@ clean:
 	$(MAKE) -C test/database clean
 	$(MAKE) -C example/spdlog clean
 	rm -f video_server
+	rm -f database_migrate

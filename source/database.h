@@ -37,6 +37,9 @@ public:
     bool query(const std::string& sql,
                std::vector<QueryRow>& rows,
                std::string& error);
+    bool escape(const std::string& input,
+                std::string& escaped,
+                std::string& error);
 
 private:
     std::unique_ptr<odb::mysql::database> database_;

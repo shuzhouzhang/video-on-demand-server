@@ -26,6 +26,21 @@ public:
                    "HTTP测试数据"}};
         return true;
     }
+
+    bool findById(const std::string& videoId,
+                  std::optional<bitevideo::Video>& video,
+                  std::string& error) override {
+        error.clear();
+        if (videoId == "video-001") {
+            video = bitevideo::Video{
+                "video-001", "测试视频", "测试用户", "6-23", 558,
+                "36000", "256", "科技", {"编程开发", "软件工具"},
+                "HTTP测试数据"};
+        } else {
+            video.reset();
+        }
+        return true;
+    }
 };
 
 }  // namespace
@@ -73,6 +88,31 @@ int main() {
                          (*body)[0]["duration"].asString() == "09:18" &&
                          (*body)[0]["tags"].isArray(),
                      "GET /videos matches the client contract");
+    }
+
+    const auto detail = client.Get("/videos/detail?id=video-001");
+    ok &= expect(detail && detail->status == 200,
+                 "GET /videos/detail returns HTTP 200");
+    if (detail) {
+        const auto body = biteutil::JSON::unserialize(detail->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["video"]["id"].asString() == "video-001",
+                     "GET /videos/detail returns the requested video");
+    }
+
+    const auto missingId = client.Get("/videos/detail");
+    if (missingId) {
+        const auto body = biteutil::JSON::unserialize(missingId->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "GET /videos/detail rejects a missing id");
+    }
+
+    const auto unknown = client.Get("/videos/detail?id=missing-video");
+    if (unknown) {
+        const auto body = biteutil::JSON::unserialize(unknown->body);
+        ok &= expect(body && !(*body)["success"].asBool() &&
+                         !(*body)["message"].asString().empty(),
+                     "GET /videos/detail reports an unknown video");
     }
 
     server.stop();

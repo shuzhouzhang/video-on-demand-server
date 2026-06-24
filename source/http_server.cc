@@ -58,6 +58,42 @@ void HttpServer::registerRoutes() {
             biteutil::JSON::serialize(body).value_or("[]"),
             "application/json; charset=utf-8");
     });
+
+    server_.Get("/videos/detail", [this](const httplib::Request& request,
+                                         httplib::Response& response) {
+        Json::Value body;
+        const std::string videoId =
+            request.has_param("id") ? request.get_param_value("id") : "";
+        if (videoId.empty()) {
+            body["success"] = false;
+            body["message"] = "视频 id 不能为空";
+        } else {
+            std::optional<bitevideo::Video> video;
+            std::string error;
+            if (!videoStore_.findById(videoId, video, error)) {
+                if (bitelog::g_logger) {
+                    ERR("GET /videos/detail failed: {}", error);
+                }
+                response.status = 500;
+                body["success"] = false;
+                body["message"] = "视频详情暂时不可用";
+            } else if (!video) {
+                body["success"] = false;
+                body["message"] = "视频不存在";
+            } else {
+                body["success"] = true;
+                body["video"] = bitevideo::toJson(*video);
+            }
+        }
+
+        if (response.status == -1) {
+            response.status = 200;
+        }
+        response.set_content(
+            biteutil::JSON::serialize(body).value_or(
+                R"({"success":false,"message":"serialization error"})"),
+            "application/json; charset=utf-8");
+    });
 }
 
 bool HttpServer::listen(const std::string& host, std::uint16_t port) {

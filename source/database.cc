@@ -122,4 +122,27 @@ bool Database::query(const std::string& sql,
     }
 }
 
+bool Database::escape(const std::string& input,
+                      std::string& escaped,
+                      std::string& error) {
+    escaped.clear();
+    error.clear();
+    if (!database_) {
+        error = "MySQL 尚未连接";
+        return false;
+    }
+
+    try {
+        auto connection = database_->connection();
+        escaped.resize(input.size() * 2 + 1);
+        const unsigned long length = mysql_real_escape_string(
+            connection->handle(), escaped.data(), input.data(), input.size());
+        escaped.resize(length);
+        return true;
+    } catch (const odb::exception& exception) {
+        error = "MySQL 参数转义失败: " + std::string(exception.what());
+        return false;
+    }
+}
+
 }  // namespace bitedb

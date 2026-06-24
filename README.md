@@ -37,6 +37,7 @@ cp conf/server.json conf/server.local.json
 ./video_server conf/server.local.json
 curl http://127.0.0.1:9000/health
 curl http://127.0.0.1:9000/videos
+curl 'http://127.0.0.1:9000/videos/detail?id=video-001'
 ```
 
 `conf/server.local.json`包含本地凭据并已被 Git 忽略，不要将真实密码写入已跟踪的配置文件。

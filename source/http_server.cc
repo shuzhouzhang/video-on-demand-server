@@ -4,6 +4,19 @@
 #include "util.h"
 
 namespace biteserver {
+namespace {
+
+void setJsonResponse(httplib::Response& response,
+                     int status,
+                     const Json::Value& body) {
+    response.status = status;
+    response.set_content(
+        biteutil::JSON::serialize(body).value_or(
+            R"({"success":false,"message":"serialization error"})"),
+        "application/json; charset=utf-8");
+}
+
+}  // namespace
 
 HttpServer::HttpServer(bitevideo::VideoStore& videoStore)
     : videoStore_(videoStore) {
@@ -94,6 +107,98 @@ void HttpServer::registerRoutes() {
                 R"({"success":false,"message":"serialization error"})"),
             "application/json; charset=utf-8");
     });
+
+    server_.Get("/videos/like-status", [this](const httplib::Request& request,
+                                              httplib::Response& response) {
+        Json::Value body;
+        const std::string videoId = request.has_param("videoId")
+            ? request.get_param_value("videoId") : "";
+        const std::string account = request.has_param("account") &&
+            !request.get_param_value("account").empty()
+            ? request.get_param_value("account") : "guest";
+        if (videoId.empty()) {
+            body["success"] = false;
+            body["message"] = "视频 id 不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<bitevideo::LikeStatus> status;
+        std::string error;
+        if (!videoStore_.likeStatus(videoId, account, status, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /videos/like-status failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "点赞状态暂时不可用";
+            setJsonResponse(response, 500, body);
+        } else if (!status) {
+            body["success"] = false;
+            body["message"] = "视频不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["liked"] = status->liked;
+            body["likeCount"] = status->likeCount;
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    const auto changeLike = [this](const httplib::Request& request,
+                                   httplib::Response& response,
+                                   bool shouldLike) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::string videoId = (*payload)["videoId"].asString();
+        std::string account = (*payload)["account"].asString();
+        if (account.empty()) {
+            account = "guest";
+        }
+        if (videoId.empty()) {
+            body["success"] = false;
+            body["message"] = "视频 id 不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<bitevideo::LikeStatus> status;
+        std::string error;
+        if (!videoStore_.setLiked(videoId, account, shouldLike, status, error)) {
+            if (bitelog::g_logger) {
+                ERR("video like change failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "点赞操作暂时不可用";
+            setJsonResponse(response, 500, body);
+        } else if (!status) {
+            body["success"] = false;
+            body["message"] = "视频不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["liked"] = status->liked;
+            body["likeCount"] = status->likeCount;
+            setJsonResponse(response, 200, body);
+        }
+    };
+
+    server_.Post("/videos/like",
+                 [changeLike](const httplib::Request& request,
+                              httplib::Response& response) {
+                     changeLike(request, response, true);
+                 });
+    server_.Post("/videos/unlike",
+                 [changeLike](const httplib::Request& request,
+                              httplib::Response& response) {
+                     changeLike(request, response, false);
+                 });
 }
 
 bool HttpServer::listen(const std::string& host, std::uint16_t port) {

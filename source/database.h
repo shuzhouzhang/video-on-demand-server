@@ -40,6 +40,11 @@ public:
     bool escape(const std::string& input,
                 std::string& escaped,
                 std::string& error);
+    // 在同一事务中执行变更；只有首条语句真正改变数据时才执行后续语句。
+    bool executeIfChanged(const std::string& changeSql,
+                          const std::string& followupSql,
+                          bool& changed,
+                          std::string& error);
 
 private:
     std::unique_ptr<odb::mysql::database> database_;

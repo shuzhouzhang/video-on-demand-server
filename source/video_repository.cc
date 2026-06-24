@@ -106,4 +106,78 @@ bool MySqlVideoRepository::findById(const std::string& videoId,
     return true;
 }
 
+bool MySqlVideoRepository::likeStatus(
+    const std::string& videoId,
+    const std::string& account,
+    std::optional<LikeStatus>& status,
+    std::string& error) {
+    status.reset();
+    std::string escapedVideoId;
+    std::string escapedAccount;
+    if (!database_.escape(videoId, escapedVideoId, error) ||
+        !database_.escape(account, escapedAccount, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql =
+        "SELECT EXISTS(SELECT 1 FROM video_likes vl "
+        "WHERE vl.video_id = v.video_id AND vl.account = '" +
+        escapedAccount + "'), CAST(v.like_count AS CHAR) "
+        "FROM videos v WHERE v.video_id = '" + escapedVideoId +
+        "' AND v.status = 1 LIMIT 1";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+    if (rows.empty()) {
+        return true;
+    }
+    if (rows.front().size() != 2) {
+        error = "点赞状态查询返回了不符合预期的字段数量";
+        return false;
+    }
+
+    status = LikeStatus{valueOrEmpty(rows.front()[0]) == "1",
+                        valueOrEmpty(rows.front()[1])};
+    return true;
+}
+
+bool MySqlVideoRepository::setLiked(
+    const std::string& videoId,
+    const std::string& account,
+    bool shouldLike,
+    std::optional<LikeStatus>& status,
+    std::string& error) {
+    if (!likeStatus(videoId, account, status, error)) {
+        return false;
+    }
+    if (!status) {
+        return true;
+    }
+
+    std::string escapedVideoId;
+    std::string escapedAccount;
+    if (!database_.escape(videoId, escapedVideoId, error) ||
+        !database_.escape(account, escapedAccount, error)) {
+        return false;
+    }
+
+    const std::string changeSql = shouldLike
+        ? "INSERT IGNORE INTO video_likes (video_id, account) VALUES ('" +
+              escapedVideoId + "', '" + escapedAccount + "')"
+        : "DELETE FROM video_likes WHERE video_id = '" + escapedVideoId +
+              "' AND account = '" + escapedAccount + "'";
+    const std::string followupSql = shouldLike
+        ? "UPDATE videos SET like_count = like_count + 1 WHERE video_id = '" +
+              escapedVideoId + "'"
+        : "UPDATE videos SET like_count = GREATEST(like_count - 1, 0) "
+          "WHERE video_id = '" + escapedVideoId + "'";
+    bool changed = false;
+    if (!database_.executeIfChanged(
+            changeSql, followupSql, changed, error)) {
+        return false;
+    }
+    return likeStatus(videoId, account, status, error);
+}
+
 }  // namespace bitevideo

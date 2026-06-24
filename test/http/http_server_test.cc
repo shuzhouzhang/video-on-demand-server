@@ -41,6 +41,42 @@ public:
         }
         return true;
     }
+
+    bool likeStatus(const std::string& videoId,
+                    const std::string&,
+                    std::optional<bitevideo::LikeStatus>& status,
+                    std::string& error) override {
+        error.clear();
+        if (videoId != "video-001") {
+            status.reset();
+        } else {
+            status = bitevideo::LikeStatus{liked_, std::to_string(likeCount_)};
+        }
+        return true;
+    }
+
+    bool setLiked(const std::string& videoId,
+                  const std::string& account,
+                  bool shouldLike,
+                  std::optional<bitevideo::LikeStatus>& status,
+                  std::string& error) override {
+        if (!likeStatus(videoId, account, status, error) || !status) {
+            return true;
+        }
+        if (shouldLike && !liked_) {
+            liked_ = true;
+            ++likeCount_;
+        } else if (!shouldLike && liked_) {
+            liked_ = false;
+            --likeCount_;
+        }
+        status = bitevideo::LikeStatus{liked_, std::to_string(likeCount_)};
+        return true;
+    }
+
+private:
+    bool liked_ = false;
+    int likeCount_ = 256;
 };
 
 }  // namespace
@@ -113,6 +149,42 @@ int main() {
         ok &= expect(body && !(*body)["success"].asBool() &&
                          !(*body)["message"].asString().empty(),
                      "GET /videos/detail reports an unknown video");
+    }
+
+    const auto initialLike = client.Get(
+        "/videos/like-status?videoId=video-001&account=bit-user-001");
+    if (initialLike) {
+        const auto body = biteutil::JSON::unserialize(initialLike->body);
+        ok &= expect(body && !(*body)["liked"].asBool() &&
+                         (*body)["likeCount"].asString() == "256",
+                     "like status starts unliked");
+    }
+
+    const std::string likeBody =
+        R"({"videoId":"video-001","account":"bit-user-001"})";
+    const auto liked = client.Post("/videos/like", likeBody, "application/json");
+    if (liked) {
+        const auto body = biteutil::JSON::unserialize(liked->body);
+        ok &= expect(body && (*body)["liked"].asBool() &&
+                         (*body)["likeCount"].asString() == "257",
+                     "POST /videos/like increments once");
+    }
+
+    const auto repeated = client.Post(
+        "/videos/like", likeBody, "application/json");
+    if (repeated) {
+        const auto body = biteutil::JSON::unserialize(repeated->body);
+        ok &= expect(body && (*body)["likeCount"].asString() == "257",
+                     "repeated like does not increment twice");
+    }
+
+    const auto unliked = client.Post(
+        "/videos/unlike", likeBody, "application/json");
+    if (unliked) {
+        const auto body = biteutil::JSON::unserialize(unliked->body);
+        ok &= expect(body && !(*body)["liked"].asBool() &&
+                         (*body)["likeCount"].asString() == "256",
+                     "POST /videos/unlike decrements once");
     }
 
     server.stop();

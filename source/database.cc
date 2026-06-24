@@ -145,4 +145,53 @@ bool Database::escape(const std::string& input,
     }
 }
 
+bool Database::executeIfChanged(const std::string& changeSql,
+                                const std::string& followupSql,
+                                bool& changed,
+                                std::string& error) {
+    changed = false;
+    error.clear();
+    if (!database_) {
+        error = "MySQL 尚未连接";
+        return false;
+    }
+
+    try {
+        auto connection = database_->connection();
+        MYSQL* handle = connection->handle();
+        if (mysql_autocommit(handle, false) != 0) {
+            error = "MySQL 开启事务失败: " + std::string(mysql_error(handle));
+            return false;
+        }
+
+        const auto fail = [&](const std::string& prefix) {
+            error = prefix + std::string(mysql_error(handle));
+            mysql_rollback(handle);
+            mysql_autocommit(handle, true);
+            return false;
+        };
+
+        if (mysql_real_query(handle, changeSql.data(), changeSql.size()) != 0) {
+            return fail("MySQL 关系变更失败: ");
+        }
+        changed = mysql_affected_rows(handle) > 0;
+        if (changed && mysql_real_query(
+                handle, followupSql.data(), followupSql.size()) != 0) {
+            return fail("MySQL 计数更新失败: ");
+        }
+        if (mysql_commit(handle) != 0) {
+            return fail("MySQL 提交事务失败: ");
+        }
+        if (mysql_autocommit(handle, true) != 0) {
+            error = "MySQL 恢复自动提交失败: " +
+                std::string(mysql_error(handle));
+            return false;
+        }
+        return true;
+    } catch (const odb::exception& exception) {
+        error = "MySQL 点赞事务失败: " + std::string(exception.what());
+        return false;
+    }
+}
+
 }  // namespace bitedb

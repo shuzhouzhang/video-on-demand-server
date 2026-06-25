@@ -139,6 +139,34 @@ bool MySqlVideoRepository::search(const std::string& keyword,
     return true;
 }
 
+bool MySqlVideoRepository::playUrl(const std::string& videoId,
+                                   std::optional<std::string>& url,
+                                   std::string& error) {
+    url.reset();
+    std::string escapedVideoId;
+    if (!database_.escape(videoId, escapedVideoId, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql =
+        "SELECT play_url FROM videos WHERE status = 1 AND video_id = '" +
+        escapedVideoId + "' LIMIT 1";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+    if (rows.empty()) {
+        return true;
+    }
+    if (rows.front().size() != 1) {
+        error = "播放地址查询返回了不符合预期的字段数量";
+        return false;
+    }
+
+    url = valueOrEmpty(rows.front()[0]);
+    return true;
+}
+
 bool MySqlVideoRepository::likeStatus(
     const std::string& videoId,
     const std::string& account,

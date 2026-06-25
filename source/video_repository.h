@@ -35,6 +35,9 @@ public:
     virtual bool search(const std::string& keyword,
                         std::vector<Video>& videos,
                         std::string& error) = 0;
+    virtual bool playUrl(const std::string& videoId,
+                         std::optional<std::string>& url,
+                         std::string& error) = 0;
     virtual bool likeStatus(const std::string& videoId,
                             const std::string& account,
                             std::optional<LikeStatus>& status,
@@ -74,6 +77,9 @@ public:
     bool search(const std::string& keyword,
                 std::vector<Video>& videos,
                 std::string& error) override;
+    bool playUrl(const std::string& videoId,
+                 std::optional<std::string>& url,
+                 std::string& error) override;
     bool likeStatus(const std::string& videoId,
                     const std::string& account,
                     std::optional<LikeStatus>& status,

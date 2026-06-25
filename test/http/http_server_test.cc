@@ -53,6 +53,18 @@ public:
         return true;
     }
 
+    bool playUrl(const std::string& videoId,
+                 std::optional<std::string>& url,
+                 std::string& error) override {
+        error.clear();
+        if (videoId == "video-001") {
+            url = "D:/video-on-demand-client/test.mp4";
+        } else {
+            url.reset();
+        }
+        return true;
+    }
+
     bool likeStatus(const std::string& videoId,
                     const std::string&,
                     std::optional<bitevideo::LikeStatus>& status,
@@ -239,6 +251,22 @@ int main() {
                          (*body)["videos"].isArray() &&
                          (*body)["videos"].empty(),
                      "GET /videos/search returns an empty list when no video matches");
+    }
+
+    const auto playUrl = client.Get("/videos/play-url?videoId=video-001");
+    if (playUrl) {
+        const auto body = biteutil::JSON::unserialize(playUrl->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["videoId"].asString() == "video-001" &&
+                         !(*body)["playUrl"].asString().empty(),
+                     "GET /videos/play-url returns a playable URL");
+    }
+
+    const auto missingPlayUrl = client.Get("/videos/play-url?videoId=missing");
+    if (missingPlayUrl) {
+        const auto body = biteutil::JSON::unserialize(missingPlayUrl->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "GET /videos/play-url reports an unknown video");
     }
 
     const auto initialLike = client.Get(

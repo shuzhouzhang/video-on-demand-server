@@ -151,6 +151,39 @@ void HttpServer::registerRoutes() {
         setJsonResponse(response, 200, body);
     });
 
+    server_.Get("/videos/play-url", [this](const httplib::Request& request,
+                                           httplib::Response& response) {
+        Json::Value body;
+        const std::string videoId = request.has_param("videoId")
+            ? request.get_param_value("videoId") : "";
+        if (videoId.empty()) {
+            body["success"] = false;
+            body["message"] = "视频 id 不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<std::string> playUrl;
+        std::string error;
+        if (!videoStore_.playUrl(videoId, playUrl, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /videos/play-url failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "播放地址暂时不可用";
+            setJsonResponse(response, 500, body);
+        } else if (!playUrl) {
+            body["success"] = false;
+            body["message"] = "视频不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["videoId"] = videoId;
+            body["playUrl"] = *playUrl;
+            setJsonResponse(response, 200, body);
+        }
+    });
+
     server_.Get("/videos/like-status", [this](const httplib::Request& request,
                                               httplib::Response& response) {
         Json::Value body;

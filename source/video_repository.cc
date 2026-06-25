@@ -473,6 +473,34 @@ bool MySqlVideoRepository::favoriteVideos(const std::string& account,
     return true;
 }
 
+bool MySqlVideoRepository::ownerVideos(const std::string& account,
+                                       std::vector<Video>& videos,
+                                       std::string& error) {
+    videos.clear();
+    std::string escapedAccount;
+    if (!database_.escape(account, escapedAccount, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql = VIDEO_SELECT +
+        "WHERE status = 1 AND owner_account = '" + escapedAccount +
+        "' ORDER BY published_on DESC, id DESC";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+
+    for (const auto& row : rows) {
+        Video video;
+        if (!videoFromRow(row, video, error)) {
+            videos.clear();
+            return false;
+        }
+        videos.push_back(std::move(video));
+    }
+    return true;
+}
+
 bool MySqlVideoRepository::comments(
     const std::string& videoId,
     std::optional<std::vector<VideoComment>>& comments,

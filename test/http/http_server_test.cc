@@ -160,6 +160,17 @@ public:
         return true;
     }
 
+    bool ownerVideos(const std::string& account,
+                     std::vector<bitevideo::Video>& videos,
+                     std::string& error) override {
+        error.clear();
+        videos.clear();
+        if (account == "bit-user-001") {
+            list(videos, error);
+        }
+        return true;
+    }
+
     bool comments(const std::string& videoId,
                   std::optional<std::vector<bitevideo::VideoComment>>& comments,
                   std::string& error) override {
@@ -534,6 +545,33 @@ int main() {
             missingFavoriteListAccount->body);
         ok &= expect(body && !(*body)["success"].asBool(),
                      "GET /users/favorites requires an account");
+    }
+
+    const auto myVideos = client.Get("/users/videos?account=bit-user-001");
+    if (myVideos) {
+        const auto body = biteutil::JSON::unserialize(myVideos->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["videos"].isArray() &&
+                         (*body)["videos"].size() == 1 &&
+                         (*body)["videos"][0]["id"].asString() == "video-001",
+                     "GET /users/videos returns owner videos");
+    }
+
+    const auto emptyMyVideos = client.Get("/users/videos?account=other-user");
+    if (emptyMyVideos) {
+        const auto body = biteutil::JSON::unserialize(emptyMyVideos->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["videos"].isArray() &&
+                         (*body)["videos"].empty(),
+                     "GET /users/videos returns an empty list when no video belongs to the account");
+    }
+
+    const auto missingMyVideosAccount = client.Get("/users/videos");
+    if (missingMyVideosAccount) {
+        const auto body = biteutil::JSON::unserialize(
+            missingMyVideosAccount->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "GET /users/videos requires an account");
     }
 
     const auto initialComments = client.Get(

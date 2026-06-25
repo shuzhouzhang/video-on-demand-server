@@ -547,6 +547,38 @@ void HttpServer::registerRoutes() {
         setJsonResponse(response, 200, body);
     });
 
+    server_.Get("/users/videos", [this](const httplib::Request& request,
+                                        httplib::Response& response) {
+        Json::Value body;
+        const std::string account = request.has_param("account")
+            ? request.get_param_value("account") : "";
+        if (account.empty()) {
+            body["success"] = false;
+            body["message"] = "请先登录后查看作品";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::vector<bitevideo::Video> videos;
+        std::string error;
+        if (!videoStore_.ownerVideos(account, videos, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /users/videos failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "我的视频暂时不可用";
+            setJsonResponse(response, 500, body);
+            return;
+        }
+
+        body["success"] = true;
+        body["videos"] = Json::arrayValue;
+        for (const bitevideo::Video& video : videos) {
+            body["videos"].append(bitevideo::toJson(video));
+        }
+        setJsonResponse(response, 200, body);
+    });
+
     server_.Get("/videos/comments", [this](const httplib::Request& request,
                                            httplib::Response& response) {
         Json::Value body;

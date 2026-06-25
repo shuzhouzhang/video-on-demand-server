@@ -89,6 +89,9 @@ public:
     virtual bool favoriteVideos(const std::string& account,
                                 std::vector<Video>& videos,
                                 std::string& error) = 0;
+    virtual bool ownerVideos(const std::string& account,
+                             std::vector<Video>& videos,
+                             std::string& error) = 0;
     virtual bool comments(const std::string& videoId,
                           std::optional<std::vector<VideoComment>>& comments,
                           std::string& error) = 0;
@@ -159,6 +162,9 @@ public:
     bool favoriteVideos(const std::string& account,
                         std::vector<Video>& videos,
                         std::string& error) override;
+    bool ownerVideos(const std::string& account,
+                     std::vector<Video>& videos,
+                     std::string& error) override;
     bool comments(const std::string& videoId,
                   std::optional<std::vector<VideoComment>>& comments,
                   std::string& error) override;

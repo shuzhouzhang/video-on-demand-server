@@ -258,6 +258,56 @@ public:
         return true;
     }
 
+    bool passwordLogin(const std::string& account,
+                       const std::string& password,
+                       std::optional<bitevideo::UserProfile>& profile,
+                       std::string& error) override {
+        error.clear();
+        if (account == user_.account && password == "123456") {
+            profile = user_;
+        } else {
+            profile.reset();
+        }
+        return true;
+    }
+
+    bool createEmailCode(const std::string& email,
+                         bitevideo::EmailCodeSession& session,
+                         std::string& error) override {
+        error.clear();
+        if (email.find('@') == std::string::npos) {
+            session = {};
+            error = "邮箱格式错误";
+        } else {
+            email_ = email;
+            session = bitevideo::EmailCodeSession{"email-code-001", "246810"};
+        }
+        return true;
+    }
+
+    bool emailLogin(const std::string& email,
+                    const std::string& authcodeId,
+                    const std::string& authcode,
+                    std::optional<bitevideo::UserProfile>& profile,
+                    std::string& error) override {
+        error.clear();
+        if (email != email_ || authcodeId != "email-code-001" ||
+            authcode != "246810") {
+            profile.reset();
+            return true;
+        }
+        profile = bitevideo::UserProfile{email, "email-user", "", ""};
+        return true;
+    }
+
+    bool logout(const std::string& account,
+                bool& knownUser,
+                std::string& error) override {
+        error.clear();
+        knownUser = account == user_.account || account == email_;
+        return true;
+    }
+
 private:
     bool liked_ = false;
     int likeCount_ = 256;
@@ -267,6 +317,7 @@ private:
     std::vector<bitevideo::VideoBarrage> barrages_;
     bitevideo::UserProfile user_{
         "bit-user-001", "BIT 用户", "真实后端用户资料", ""};
+    std::string email_;
 };
 
 }  // namespace
@@ -302,6 +353,65 @@ int main() {
     const auto missing = client.Get("/missing");
     ok &= expect(missing && missing->status == 404,
                  "unknown route returns HTTP 404");
+
+    const auto login = client.Post(
+        "/login", R"({"account":"bit-user-001","password":"123456"})",
+        "application/json");
+    if (login) {
+        const auto body = biteutil::JSON::unserialize(login->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["account"].asString() == "bit-user-001",
+                     "POST /login accepts valid credentials");
+    }
+
+    const auto badLogin = client.Post(
+        "/login", R"({"account":"bit-user-001","password":"bad"})",
+        "application/json");
+    if (badLogin) {
+        const auto body = biteutil::JSON::unserialize(badLogin->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /login rejects invalid credentials");
+    }
+
+    const auto emailCode = client.Post(
+        "/login/email-code", R"({"email":"email-user@example.com"})",
+        "application/json");
+    if (emailCode) {
+        const auto body = biteutil::JSON::unserialize(emailCode->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["authcodeId"].asString() == "email-code-001" &&
+                         (*body)["debugCode"].asString() == "246810",
+                     "POST /login/email-code creates a code session");
+    }
+
+    const auto emailLogin = client.Post(
+        "/login/email",
+        R"({"email":"email-user@example.com","authcodeId":"email-code-001","authcode":"246810"})",
+        "application/json");
+    if (emailLogin) {
+        const auto body = biteutil::JSON::unserialize(emailLogin->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["account"].asString() == "email-user@example.com",
+                     "POST /login/email accepts a valid code");
+    }
+
+    const auto badEmailLogin = client.Post(
+        "/login/email",
+        R"({"email":"email-user@example.com","authcodeId":"email-code-001","authcode":"000000"})",
+        "application/json");
+    if (badEmailLogin) {
+        const auto body = biteutil::JSON::unserialize(badEmailLogin->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /login/email rejects an invalid code");
+    }
+
+    const auto logout = client.Post(
+        "/logout", R"({"account":"bit-user-001"})", "application/json");
+    if (logout) {
+        const auto body = biteutil::JSON::unserialize(logout->body);
+        ok &= expect(body && (*body)["success"].asBool(),
+                     "POST /logout accepts a known user");
+    }
 
     const auto videos = client.Get("/videos");
     ok &= expect(videos && videos->status == 200,

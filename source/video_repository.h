@@ -46,6 +46,11 @@ struct UserProfile {
     std::string avatarPath;
 };
 
+struct EmailCodeSession {
+    std::string authcodeId;
+    std::string debugCode;
+};
+
 class VideoStore {
 public:
     virtual ~VideoStore() = default;
@@ -117,6 +122,21 @@ public:
                                    const std::string& description,
                                    std::optional<UserProfile>& profile,
                                    std::string& error) = 0;
+    virtual bool passwordLogin(const std::string& account,
+                               const std::string& password,
+                               std::optional<UserProfile>& profile,
+                               std::string& error) = 0;
+    virtual bool createEmailCode(const std::string& email,
+                                 EmailCodeSession& session,
+                                 std::string& error) = 0;
+    virtual bool emailLogin(const std::string& email,
+                            const std::string& authcodeId,
+                            const std::string& authcode,
+                            std::optional<UserProfile>& profile,
+                            std::string& error) = 0;
+    virtual bool logout(const std::string& account,
+                        bool& knownUser,
+                        std::string& error) = 0;
 };
 
 class MySqlVideoRepository : public VideoStore {
@@ -190,6 +210,21 @@ public:
                            const std::string& description,
                            std::optional<UserProfile>& profile,
                            std::string& error) override;
+    bool passwordLogin(const std::string& account,
+                       const std::string& password,
+                       std::optional<UserProfile>& profile,
+                       std::string& error) override;
+    bool createEmailCode(const std::string& email,
+                         EmailCodeSession& session,
+                         std::string& error) override;
+    bool emailLogin(const std::string& email,
+                    const std::string& authcodeId,
+                    const std::string& authcode,
+                    std::optional<UserProfile>& profile,
+                    std::string& error) override;
+    bool logout(const std::string& account,
+                bool& knownUser,
+                std::string& error) override;
 
 private:
     bitedb::Database& database_;

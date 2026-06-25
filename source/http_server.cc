@@ -3,6 +3,9 @@
 #include "bitelog.h"
 #include "util.h"
 
+#include <algorithm>
+#include <cctype>
+
 namespace biteserver {
 namespace {
 
@@ -88,6 +91,17 @@ Json::Value userProfileToJson(const bitevideo::UserProfile& profile) {
     return value;
 }
 
+std::string trimCopy(std::string value) {
+    const auto notSpace = [](unsigned char ch) {
+        return !std::isspace(ch);
+    };
+    value.erase(value.begin(),
+                std::find_if(value.begin(), value.end(), notSpace));
+    value.erase(std::find_if(value.rbegin(), value.rend(), notSpace).base(),
+                value.end());
+    return value;
+}
+
 }  // namespace
 
 HttpServer::HttpServer(bitevideo::VideoStore& videoStore)
@@ -142,6 +156,151 @@ void HttpServer::registerRoutes() {
         response.set_content(
             biteutil::JSON::serialize(body).value_or("[]"),
             "application/json; charset=utf-8");
+    });
+
+    server_.Post("/login", [this](const httplib::Request& request,
+                                  httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::string account = trimCopy((*payload)["account"].asString());
+        const std::string password = (*payload)["password"].asString();
+        std::optional<bitevideo::UserProfile> profile;
+        std::string error;
+        if (!videoStore_.passwordLogin(account, password, profile, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /login failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "登录暂时不可用";
+            setJsonResponse(response, 500, body);
+        } else if (!profile) {
+            body["success"] = false;
+            body["message"] = "账号或密码错误";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["userName"] = profile->userName;
+            body["account"] = profile->account;
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Post("/login/email-code",
+                 [this](const httplib::Request& request,
+                        httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        bitevideo::EmailCodeSession session;
+        std::string error;
+        const std::string email = trimCopy((*payload)["email"].asString());
+        if (!videoStore_.createEmailCode(email, session, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /login/email-code failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "验证码发送失败";
+            setJsonResponse(response, 500, body);
+        } else if (session.authcodeId.empty()) {
+            body["success"] = false;
+            body["message"] = error.empty() ? "邮箱格式错误" : error;
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["message"] = "验证码已发送";
+            body["authcodeId"] = session.authcodeId;
+            body["debugCode"] = session.debugCode;
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Post("/login/email", [this](const httplib::Request& request,
+                                        httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::string email = trimCopy((*payload)["email"].asString());
+        const std::string authcodeId =
+            trimCopy((*payload)["authcodeId"].asString());
+        const std::string authcode =
+            trimCopy((*payload)["authcode"].asString());
+        std::optional<bitevideo::UserProfile> profile;
+        std::string error;
+        if (!videoStore_.emailLogin(
+                email, authcodeId, authcode, profile, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /login/email failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "邮箱验证码登录失败";
+            setJsonResponse(response, 500, body);
+        } else if (!profile) {
+            body["success"] = false;
+            body["message"] = "验证码错误或已失效";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["userName"] = profile->userName;
+            body["account"] = profile->account;
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Post("/logout", [this](const httplib::Request& request,
+                                   httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        bool knownUser = false;
+        std::string error;
+        const std::string account = trimCopy((*payload)["account"].asString());
+        if (account.empty()) {
+            body["success"] = false;
+            body["message"] = "当前没有登录用户";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (!videoStore_.logout(account, knownUser, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /logout failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "退出登录失败";
+            setJsonResponse(response, 500, body);
+        } else if (!knownUser) {
+            body["success"] = false;
+            body["message"] = "用户不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["message"] = "已退出登录";
+            setJsonResponse(response, 200, body);
+        }
     });
 
     server_.Get("/videos/detail", [this](const httplib::Request& request,

@@ -2,6 +2,10 @@
 
 #include "util.h"
 
+#include <algorithm>
+#include <cctype>
+#include <regex>
+
 namespace bitevideo {
 namespace {
 
@@ -113,6 +117,22 @@ bool profileFromRow(const bitedb::Database::QueryRow& row,
     profile.description = valueOrEmpty(row[2]);
     profile.avatarPath = valueOrEmpty(row[3]);
     return true;
+}
+
+std::string lowerCopy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) {
+                       return static_cast<char>(std::tolower(ch));
+                   });
+    return value;
+}
+
+std::string nameFromEmail(const std::string& email) {
+    const auto at = email.find('@');
+    if (at == std::string::npos || at == 0) {
+        return email;
+    }
+    return email.substr(0, at);
 }
 
 }  // namespace
@@ -726,6 +746,158 @@ bool MySqlVideoRepository::updateUserProfile(
         return false;
     }
     return userProfile(account, profile, error);
+}
+
+bool MySqlVideoRepository::passwordLogin(
+    const std::string& account,
+    const std::string& password,
+    std::optional<UserProfile>& profile,
+    std::string& error) {
+    profile.reset();
+    std::string escapedAccount;
+    std::string escapedPassword;
+    if (!database_.escape(account, escapedAccount, error) ||
+        !database_.escape(password, escapedPassword, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql =
+        "SELECT account, user_name, description, avatar_path FROM users "
+        "WHERE account = '" + escapedAccount + "' AND password = '" +
+        escapedPassword + "' LIMIT 1";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+    if (rows.empty()) {
+        return true;
+    }
+
+    UserProfile found;
+    if (!profileFromRow(rows.front(), found, error)) {
+        return false;
+    }
+    profile = std::move(found);
+    return true;
+}
+
+bool MySqlVideoRepository::createEmailCode(const std::string& email,
+                                           EmailCodeSession& session,
+                                           std::string& error) {
+    const std::string normalizedEmail = lowerCopy(email);
+    static const std::regex EMAIL_RE(
+        R"(^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$)");
+    if (!std::regex_match(normalizedEmail, EMAIL_RE)) {
+        error = "邮箱格式错误";
+        return true;
+    }
+
+    const std::string debugCode = "246810";
+    std::string escapedEmail;
+    std::string escapedCode;
+    if (!database_.escape(normalizedEmail, escapedEmail, error) ||
+        !database_.escape(debugCode, escapedCode, error)) {
+        return false;
+    }
+
+    const std::string insertSql =
+        "INSERT INTO email_login_codes (authcode_id, email, authcode) "
+        "VALUES ('pending', '" + escapedEmail + "', '" + escapedCode + "')";
+    if (!database_.execute(insertSql, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string updateSql =
+        "UPDATE email_login_codes SET authcode_id = "
+        "CONCAT('email-code-', LPAD(id, 3, '0')) "
+        "WHERE id = LAST_INSERT_ID()";
+    if (!database_.execute(updateSql, error)) {
+        return false;
+    }
+    const std::string selectSql =
+        "SELECT authcode_id, authcode FROM email_login_codes "
+        "WHERE id = LAST_INSERT_ID()";
+    if (!database_.query(selectSql, rows, error)) {
+        return false;
+    }
+    if (rows.empty() || rows.front().size() != 2) {
+        error = "验证码会话创建后无法读取";
+        return false;
+    }
+
+    session.authcodeId = valueOrEmpty(rows.front()[0]);
+    session.debugCode = valueOrEmpty(rows.front()[1]);
+    return true;
+}
+
+bool MySqlVideoRepository::emailLogin(
+    const std::string& email,
+    const std::string& authcodeId,
+    const std::string& authcode,
+    std::optional<UserProfile>& profile,
+    std::string& error) {
+    profile.reset();
+    const std::string normalizedEmail = lowerCopy(email);
+    std::string escapedEmail;
+    std::string escapedAuthcodeId;
+    std::string escapedAuthcode;
+    if (!database_.escape(normalizedEmail, escapedEmail, error) ||
+        !database_.escape(authcodeId, escapedAuthcodeId, error) ||
+        !database_.escape(authcode, escapedAuthcode, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string codeSql =
+        "SELECT id FROM email_login_codes WHERE authcode_id = '" +
+        escapedAuthcodeId + "' AND email = '" + escapedEmail +
+        "' AND authcode = '" + escapedAuthcode +
+        "' AND consumed = 0 LIMIT 1";
+    if (!database_.query(codeSql, rows, error)) {
+        return false;
+    }
+    if (rows.empty()) {
+        return true;
+    }
+
+    const std::string consumeSql =
+        "UPDATE email_login_codes SET consumed = 1 WHERE id = " +
+        valueOrEmpty(rows.front()[0]);
+    if (!database_.execute(consumeSql, error)) {
+        return false;
+    }
+
+    std::optional<UserProfile> existing;
+    if (!userProfile(normalizedEmail, existing, error)) {
+        return false;
+    }
+    if (!existing) {
+        std::string escapedUserName;
+        const std::string userName = nameFromEmail(normalizedEmail);
+        if (!database_.escape(userName, escapedUserName, error)) {
+            return false;
+        }
+        const std::string insertUserSql =
+            "INSERT INTO users (account, password, user_name, description, "
+            "avatar_path) VALUES ('" + escapedEmail + "', '', '" +
+            escapedUserName + "', '', '')";
+        if (!database_.execute(insertUserSql, error)) {
+            return false;
+        }
+    }
+    return userProfile(normalizedEmail, profile, error);
+}
+
+bool MySqlVideoRepository::logout(const std::string& account,
+                                  bool& knownUser,
+                                  std::string& error) {
+    std::optional<UserProfile> profile;
+    if (!userProfile(account, profile, error)) {
+        return false;
+    }
+    knownUser = profile.has_value();
+    return true;
 }
 
 }  // namespace bitevideo

@@ -40,6 +40,7 @@ cp conf/server.json conf/server.local.json
 curl http://127.0.0.1:9000/health
 curl http://127.0.0.1:9000/videos
 curl 'http://127.0.0.1:9000/videos/detail?id=video-001'
+curl 'http://127.0.0.1:9000/videos/search?keyword=%E7%BC%96%E7%A8%8B'
 curl 'http://127.0.0.1:9000/videos/like-status?videoId=video-001&account=bit-user-001'
 curl 'http://127.0.0.1:9000/videos/watch-progress?videoId=video-001&account=bit-user-001'
 ```

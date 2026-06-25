@@ -106,6 +106,39 @@ bool MySqlVideoRepository::findById(const std::string& videoId,
     return true;
 }
 
+bool MySqlVideoRepository::search(const std::string& keyword,
+                                  std::vector<Video>& videos,
+                                  std::string& error) {
+    videos.clear();
+    std::string escapedKeyword;
+    if (!database_.escape(keyword, escapedKeyword, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string pattern = "'%" + escapedKeyword + "%'";
+    const std::string sql = VIDEO_SELECT +
+        "WHERE status = 1 AND (title LIKE " + pattern +
+        " OR user_name LIKE " + pattern +
+        " OR category LIKE " + pattern +
+        " OR CAST(tags AS CHAR) LIKE " + pattern +
+        " OR description LIKE " + pattern +
+        ") ORDER BY published_on DESC, id DESC";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+
+    for (const auto& row : rows) {
+        Video video;
+        if (!videoFromRow(row, video, error)) {
+            videos.clear();
+            return false;
+        }
+        videos.push_back(std::move(video));
+    }
+    return true;
+}
+
 bool MySqlVideoRepository::likeStatus(
     const std::string& videoId,
     const std::string& account,

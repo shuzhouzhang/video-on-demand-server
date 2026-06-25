@@ -119,6 +119,38 @@ void HttpServer::registerRoutes() {
             "application/json; charset=utf-8");
     });
 
+    server_.Get("/videos/search", [this](const httplib::Request& request,
+                                         httplib::Response& response) {
+        Json::Value body;
+        const std::string keyword = request.has_param("keyword")
+            ? request.get_param_value("keyword") : "";
+        if (keyword.empty()) {
+            body["success"] = false;
+            body["message"] = "搜索关键词不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::vector<bitevideo::Video> videos;
+        std::string error;
+        if (!videoStore_.search(keyword, videos, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /videos/search failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "视频搜索暂时不可用";
+            setJsonResponse(response, 500, body);
+            return;
+        }
+
+        body["success"] = true;
+        body["videos"] = Json::arrayValue;
+        for (const bitevideo::Video& video : videos) {
+            body["videos"].append(bitevideo::toJson(video));
+        }
+        setJsonResponse(response, 200, body);
+    });
+
     server_.Get("/videos/like-status", [this](const httplib::Request& request,
                                               httplib::Response& response) {
         Json::Value body;

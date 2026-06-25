@@ -42,6 +42,17 @@ public:
         return true;
     }
 
+    bool search(const std::string& keyword,
+                std::vector<bitevideo::Video>& videos,
+                std::string& error) override {
+        error.clear();
+        videos.clear();
+        if (keyword == "测试" || keyword == "科技") {
+            list(videos, error);
+        }
+        return true;
+    }
+
     bool likeStatus(const std::string& videoId,
                     const std::string&,
                     std::optional<bitevideo::LikeStatus>& status,
@@ -176,6 +187,31 @@ int main() {
         ok &= expect(body && !(*body)["success"].asBool() &&
                          !(*body)["message"].asString().empty(),
                      "GET /videos/detail reports an unknown video");
+    }
+
+    const auto search = client.Get("/videos/search?keyword=%E6%B5%8B%E8%AF%95");
+    if (search) {
+        const auto body = biteutil::JSON::unserialize(search->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["videos"].isArray() &&
+                         (*body)["videos"].size() == 1,
+                     "GET /videos/search returns matched videos");
+    }
+
+    const auto emptySearch = client.Get("/videos/search");
+    if (emptySearch) {
+        const auto body = biteutil::JSON::unserialize(emptySearch->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "GET /videos/search rejects an empty keyword");
+    }
+
+    const auto noSearchResult = client.Get("/videos/search?keyword=not-found");
+    if (noSearchResult) {
+        const auto body = biteutil::JSON::unserialize(noSearchResult->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["videos"].isArray() &&
+                         (*body)["videos"].empty(),
+                     "GET /videos/search returns an empty list when no video matches");
     }
 
     const auto initialLike = client.Get(

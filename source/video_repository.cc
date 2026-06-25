@@ -425,6 +425,40 @@ bool MySqlVideoRepository::setFavorited(
     return favoriteStatus(videoId, account, status, error);
 }
 
+bool MySqlVideoRepository::favoriteVideos(const std::string& account,
+                                          std::vector<Video>& videos,
+                                          std::string& error) {
+    videos.clear();
+    std::string escapedAccount;
+    if (!database_.escape(account, escapedAccount, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql =
+        "SELECT videos.video_id, videos.title, videos.user_name, "
+        "DATE_FORMAT(videos.published_on, '%c-%e'), videos.duration_seconds, "
+        "CAST(videos.play_count AS CHAR), CAST(videos.like_count AS CHAR), "
+        "videos.category, CAST(videos.tags AS CHAR), videos.description "
+        "FROM videos "
+        "INNER JOIN video_favorites vf ON vf.video_id = videos.video_id "
+        "WHERE videos.status = 1 AND vf.account = '" + escapedAccount +
+        "' ORDER BY vf.created_at DESC, vf.id DESC";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+
+    for (const auto& row : rows) {
+        Video video;
+        if (!videoFromRow(row, video, error)) {
+            videos.clear();
+            return false;
+        }
+        videos.push_back(std::move(video));
+    }
+    return true;
+}
+
 bool MySqlVideoRepository::comments(
     const std::string& videoId,
     std::optional<std::vector<VideoComment>>& comments,

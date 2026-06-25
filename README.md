@@ -49,6 +49,7 @@ curl 'http://127.0.0.1:9000/videos/play-url?videoId=video-001'
 curl 'http://127.0.0.1:9000/videos/like-status?videoId=video-001&account=bit-user-001'
 curl 'http://127.0.0.1:9000/videos/watch-progress?videoId=video-001&account=bit-user-001'
 curl 'http://127.0.0.1:9000/videos/favorite-status?videoId=video-001&account=bit-user-001'
+curl 'http://127.0.0.1:9000/users/favorites?account=bit-user-001'
 curl 'http://127.0.0.1:9000/videos/comments?videoId=video-001'
 curl 'http://127.0.0.1:9000/videos/barrages?videoId=video-001'
 ```

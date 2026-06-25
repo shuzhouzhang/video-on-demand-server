@@ -149,6 +149,17 @@ public:
         return true;
     }
 
+    bool favoriteVideos(const std::string&,
+                        std::vector<bitevideo::Video>& videos,
+                        std::string& error) override {
+        error.clear();
+        videos.clear();
+        if (favorited_) {
+            list(videos, error);
+        }
+        return true;
+    }
+
     bool comments(const std::string& videoId,
                   std::optional<std::vector<bitevideo::VideoComment>>& comments,
                   std::string& error) override {
@@ -459,6 +470,40 @@ int main() {
             missingFavoriteAccount->body);
         ok &= expect(body && !(*body)["success"].asBool(),
                      "POST /videos/favorite requires an account");
+    }
+
+    const auto favoriteListAfterUnfavorite = client.Get(
+        "/users/favorites?account=bit-user-001");
+    if (favoriteListAfterUnfavorite) {
+        const auto body = biteutil::JSON::unserialize(
+            favoriteListAfterUnfavorite->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["videos"].isArray() &&
+                         (*body)["videos"].empty(),
+                     "GET /users/favorites starts empty");
+    }
+
+    const auto favoriteAgain = client.Post(
+        "/videos/favorite", favoriteBody, "application/json");
+    if (favoriteAgain) {
+        const auto favoriteList = client.Get(
+            "/users/favorites?account=bit-user-001");
+        if (favoriteList) {
+            const auto body = biteutil::JSON::unserialize(favoriteList->body);
+            ok &= expect(body && (*body)["success"].asBool() &&
+                             (*body)["videos"].size() == 1 &&
+                             (*body)["videos"][0]["id"].asString() ==
+                                 "video-001",
+                         "GET /users/favorites returns favorited videos");
+        }
+    }
+
+    const auto missingFavoriteListAccount = client.Get("/users/favorites");
+    if (missingFavoriteListAccount) {
+        const auto body = biteutil::JSON::unserialize(
+            missingFavoriteListAccount->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "GET /users/favorites requires an account");
     }
 
     const auto initialComments = client.Get(

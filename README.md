@@ -39,6 +39,7 @@ cp conf/server.json conf/server.local.json
 ./database_migrate conf/server.local.json migrations/004_create_video_favorites.sql
 ./database_migrate conf/server.local.json migrations/005_add_video_play_url.sql
 ./database_migrate conf/server.local.json migrations/006_create_video_comments.sql
+./database_migrate conf/server.local.json migrations/007_create_video_barrages.sql
 ./video_server conf/server.local.json
 curl http://127.0.0.1:9000/health
 curl http://127.0.0.1:9000/videos
@@ -49,6 +50,7 @@ curl 'http://127.0.0.1:9000/videos/like-status?videoId=video-001&account=bit-use
 curl 'http://127.0.0.1:9000/videos/watch-progress?videoId=video-001&account=bit-user-001'
 curl 'http://127.0.0.1:9000/videos/favorite-status?videoId=video-001&account=bit-user-001'
 curl 'http://127.0.0.1:9000/videos/comments?videoId=video-001'
+curl 'http://127.0.0.1:9000/videos/barrages?videoId=video-001'
 ```
 
 `conf/server.local.json`包含本地凭据并已被 Git 忽略，不要将真实密码写入已跟踪的配置文件。

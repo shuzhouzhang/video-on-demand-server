@@ -37,6 +37,30 @@ std::size_t utf8CharCount(const std::string& value) {
     return count;
 }
 
+std::string utf8Prefix(const std::string& value, std::size_t maxChars) {
+    std::size_t chars = 0;
+    std::size_t bytes = 0;
+    while (bytes < value.size() && chars < maxChars) {
+        const unsigned char ch = static_cast<unsigned char>(value[bytes]);
+        std::size_t step = 1;
+        if ((ch & 0x80) == 0) {
+            step = 1;
+        } else if ((ch & 0xE0) == 0xC0) {
+            step = 2;
+        } else if ((ch & 0xF0) == 0xE0) {
+            step = 3;
+        } else if ((ch & 0xF8) == 0xF0) {
+            step = 4;
+        }
+        if (bytes + step > value.size()) {
+            break;
+        }
+        bytes += step;
+        ++chars;
+    }
+    return value.substr(0, bytes);
+}
+
 Json::Value commentToJson(const bitevideo::VideoComment& comment) {
     Json::Value value;
     value["id"] = comment.id;
@@ -45,6 +69,13 @@ Json::Value commentToJson(const bitevideo::VideoComment& comment) {
     value["account"] = comment.account;
     value["content"] = comment.content;
     value["createdAt"] = comment.createdAt;
+    return value;
+}
+
+Json::Value barrageToJson(const bitevideo::VideoBarrage& barrage) {
+    Json::Value value;
+    value["seconds"] = barrage.seconds;
+    value["text"] = barrage.text;
     return value;
 }
 
@@ -562,6 +593,99 @@ void HttpServer::registerRoutes() {
             body["success"] = true;
             body["message"] = "评论成功";
             body["comment"] = commentToJson(*comment);
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Get("/videos/barrages", [this](const httplib::Request& request,
+                                           httplib::Response& response) {
+        Json::Value body;
+        const std::string videoId = request.has_param("videoId")
+            ? request.get_param_value("videoId") : "";
+        if (videoId.empty()) {
+            body["success"] = false;
+            body["message"] = "视频标识不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<std::vector<bitevideo::VideoBarrage>> barrages;
+        std::string error;
+        if (!videoStore_.barrages(videoId, barrages, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /videos/barrages failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "弹幕列表暂时不可用";
+            setJsonResponse(response, 500, body);
+        } else if (!barrages) {
+            body["success"] = false;
+            body["message"] = "视频不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["barrages"] = Json::arrayValue;
+            for (const auto& barrage : *barrages) {
+                body["barrages"].append(barrageToJson(barrage));
+            }
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Post("/videos/barrages", [this](const httplib::Request& request,
+                                            httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::string videoId = (*payload)["videoId"].asString();
+        const std::string text = (*payload)["text"].asString();
+        if (videoId.empty()) {
+            body["success"] = false;
+            body["message"] = "视频标识不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (!(*payload)["seconds"].isInt() || (*payload)["seconds"].asInt() < 0) {
+            body["success"] = false;
+            body["message"] = "弹幕时间非法";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (text.empty()) {
+            body["success"] = false;
+            body["message"] = "弹幕内容不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::string clippedText = utf8CharCount(text) > 30
+            ? utf8Prefix(text, 30) : text;
+        std::optional<bitevideo::VideoBarrage> barrage;
+        std::string error;
+        if (!videoStore_.addBarrage(
+                videoId, (*payload)["seconds"].asInt(), clippedText,
+                barrage, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /videos/barrages failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "弹幕发送失败";
+            setJsonResponse(response, 500, body);
+        } else if (!barrage) {
+            body["success"] = false;
+            body["message"] = "视频不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["message"] = "发送成功";
+            body["seconds"] = barrage->seconds;
+            body["text"] = barrage->text;
             setJsonResponse(response, 200, body);
         }
     });

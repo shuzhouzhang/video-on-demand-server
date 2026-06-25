@@ -84,6 +84,23 @@ bool commentFromRow(const bitedb::Database::QueryRow& row,
     return true;
 }
 
+bool barrageFromRow(const bitedb::Database::QueryRow& row,
+                    VideoBarrage& barrage,
+                    std::string& error) {
+    if (row.size() != 2) {
+        error = "弹幕查询返回了不符合预期的字段数量";
+        return false;
+    }
+    try {
+        barrage.seconds = std::stoi(valueOrEmpty(row[0]));
+    } catch (const std::exception&) {
+        error = "弹幕时间不是有效数字";
+        return false;
+    }
+    barrage.text = valueOrEmpty(row[1]);
+    return true;
+}
+
 }  // namespace
 
 MySqlVideoRepository::MySqlVideoRepository(bitedb::Database& database)
@@ -501,6 +518,77 @@ bool MySqlVideoRepository::addComment(
         return false;
     }
     comment = std::move(saved);
+    return true;
+}
+
+bool MySqlVideoRepository::barrages(
+    const std::string& videoId,
+    std::optional<std::vector<VideoBarrage>>& barrages,
+    std::string& error) {
+    barrages.reset();
+    std::string escapedVideoId;
+    if (!database_.escape(videoId, escapedVideoId, error)) {
+        return false;
+    }
+
+    bool exists = false;
+    if (!videoExists(database_, escapedVideoId, exists, error)) {
+        return false;
+    }
+    if (!exists) {
+        return true;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql =
+        "SELECT seconds, text FROM video_barrages WHERE video_id = '" +
+        escapedVideoId + "' ORDER BY seconds ASC, id ASC";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+
+    std::vector<VideoBarrage> result;
+    for (const auto& row : rows) {
+        VideoBarrage barrage;
+        if (!barrageFromRow(row, barrage, error)) {
+            return false;
+        }
+        result.push_back(std::move(barrage));
+    }
+    barrages = std::move(result);
+    return true;
+}
+
+bool MySqlVideoRepository::addBarrage(
+    const std::string& videoId,
+    int seconds,
+    const std::string& text,
+    std::optional<VideoBarrage>& barrage,
+    std::string& error) {
+    barrage.reset();
+    std::string escapedVideoId;
+    std::string escapedText;
+    if (!database_.escape(videoId, escapedVideoId, error) ||
+        !database_.escape(text, escapedText, error)) {
+        return false;
+    }
+
+    bool exists = false;
+    if (!videoExists(database_, escapedVideoId, exists, error)) {
+        return false;
+    }
+    if (!exists) {
+        return true;
+    }
+
+    const std::string insertSql =
+        "INSERT INTO video_barrages (video_id, seconds, text) VALUES ('" +
+        escapedVideoId + "', " + std::to_string(seconds) + ", '" +
+        escapedText + "')";
+    if (!database_.execute(insertSql, error)) {
+        return false;
+    }
+    barrage = VideoBarrage{seconds, text};
     return true;
 }
 

@@ -180,12 +180,41 @@ public:
         return true;
     }
 
+    bool barrages(const std::string& videoId,
+                  std::optional<std::vector<bitevideo::VideoBarrage>>& barrages,
+                  std::string& error) override {
+        error.clear();
+        if (videoId != "video-001") {
+            barrages.reset();
+        } else {
+            barrages = barrages_;
+        }
+        return true;
+    }
+
+    bool addBarrage(const std::string& videoId,
+                    int seconds,
+                    const std::string& text,
+                    std::optional<bitevideo::VideoBarrage>& barrage,
+                    std::string& error) override {
+        error.clear();
+        if (videoId != "video-001") {
+            barrage.reset();
+            return true;
+        }
+        bitevideo::VideoBarrage saved{seconds, text};
+        barrages_.push_back(saved);
+        barrage = saved;
+        return true;
+    }
+
 private:
     bool liked_ = false;
     int likeCount_ = 256;
     int watchSeconds_ = 0;
     bool favorited_ = false;
     std::vector<bitevideo::VideoComment> comments_;
+    std::vector<bitevideo::VideoBarrage> barrages_;
 };
 
 }  // namespace
@@ -481,6 +510,57 @@ int main() {
         const auto body = biteutil::JSON::unserialize(emptyComment->body);
         ok &= expect(body && !(*body)["success"].asBool(),
                      "POST /videos/comments rejects empty content");
+    }
+
+    const auto initialBarrages = client.Get(
+        "/videos/barrages?videoId=video-001");
+    if (initialBarrages) {
+        const auto body = biteutil::JSON::unserialize(initialBarrages->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["barrages"].isArray() &&
+                         (*body)["barrages"].empty(),
+                     "GET /videos/barrages starts with an empty list");
+    }
+
+    const auto sentBarrage = client.Post(
+        "/videos/barrages",
+        R"({"videoId":"video-001","seconds":8,"text":"第一条弹幕"})",
+        "application/json");
+    if (sentBarrage) {
+        const auto body = biteutil::JSON::unserialize(sentBarrage->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["seconds"].asInt() == 8 &&
+                         (*body)["text"].asString() == "第一条弹幕",
+                     "POST /videos/barrages returns the saved barrage");
+    }
+
+    const auto loadedBarrages = client.Get(
+        "/videos/barrages?videoId=video-001");
+    if (loadedBarrages) {
+        const auto body = biteutil::JSON::unserialize(loadedBarrages->body);
+        ok &= expect(body && (*body)["barrages"].size() == 1,
+                     "GET /videos/barrages returns saved barrages");
+    }
+
+    const auto invalidBarrageSeconds = client.Post(
+        "/videos/barrages",
+        R"({"videoId":"video-001","seconds":-1,"text":"非法时间"})",
+        "application/json");
+    if (invalidBarrageSeconds) {
+        const auto body = biteutil::JSON::unserialize(
+            invalidBarrageSeconds->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos/barrages rejects invalid seconds");
+    }
+
+    const auto emptyBarrageText = client.Post(
+        "/videos/barrages",
+        R"({"videoId":"video-001","seconds":8,"text":""})",
+        "application/json");
+    if (emptyBarrageText) {
+        const auto body = biteutil::JSON::unserialize(emptyBarrageText->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos/barrages rejects empty text");
     }
 
     server.stop();

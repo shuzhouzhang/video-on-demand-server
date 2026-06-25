@@ -34,6 +34,11 @@ struct VideoComment {
     std::string createdAt;
 };
 
+struct VideoBarrage {
+    int seconds;
+    std::string text;
+};
+
 class VideoStore {
 public:
     virtual ~VideoStore() = default;
@@ -82,6 +87,14 @@ public:
                             const std::string& account,
                             const std::string& content,
                             std::optional<VideoComment>& comment,
+                            std::string& error) = 0;
+    virtual bool barrages(const std::string& videoId,
+                          std::optional<std::vector<VideoBarrage>>& barrages,
+                          std::string& error) = 0;
+    virtual bool addBarrage(const std::string& videoId,
+                            int seconds,
+                            const std::string& text,
+                            std::optional<VideoBarrage>& barrage,
                             std::string& error) = 0;
 };
 
@@ -133,6 +146,14 @@ public:
                     const std::string& account,
                     const std::string& content,
                     std::optional<VideoComment>& comment,
+                    std::string& error) override;
+    bool barrages(const std::string& videoId,
+                  std::optional<std::vector<VideoBarrage>>& barrages,
+                  std::string& error) override;
+    bool addBarrage(const std::string& videoId,
+                    int seconds,
+                    const std::string& text,
+                    std::optional<VideoBarrage>& barrage,
                     std::string& error) override;
 
 private:

@@ -27,6 +27,27 @@ std::string accountOrGuest(const Json::Value& payload) {
     return account.empty() ? "guest" : account;
 }
 
+std::size_t utf8CharCount(const std::string& value) {
+    std::size_t count = 0;
+    for (unsigned char ch : value) {
+        if ((ch & 0xC0) != 0x80) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+Json::Value commentToJson(const bitevideo::VideoComment& comment) {
+    Json::Value value;
+    value["id"] = comment.id;
+    value["videoId"] = comment.videoId;
+    value["userName"] = comment.userName;
+    value["account"] = comment.account;
+    value["content"] = comment.content;
+    value["createdAt"] = comment.createdAt;
+    return value;
+}
+
 }  // namespace
 
 HttpServer::HttpServer(bitevideo::VideoStore& videoStore)
@@ -453,6 +474,97 @@ void HttpServer::registerRoutes() {
                                   httplib::Response& response) {
                      changeFavorite(request, response, false);
                  });
+
+    server_.Get("/videos/comments", [this](const httplib::Request& request,
+                                           httplib::Response& response) {
+        Json::Value body;
+        const std::string videoId = request.has_param("videoId")
+            ? request.get_param_value("videoId") : "";
+        if (videoId.empty()) {
+            body["success"] = false;
+            body["message"] = "视频 id 不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<std::vector<bitevideo::VideoComment>> comments;
+        std::string error;
+        if (!videoStore_.comments(videoId, comments, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /videos/comments failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "评论列表暂时不可用";
+            setJsonResponse(response, 500, body);
+        } else if (!comments) {
+            body["success"] = false;
+            body["message"] = "视频不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["comments"] = Json::arrayValue;
+            for (const auto& comment : *comments) {
+                body["comments"].append(commentToJson(comment));
+            }
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Post("/videos/comments", [this](const httplib::Request& request,
+                                            httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::string videoId = (*payload)["videoId"].asString();
+        const std::string userName = (*payload)["userName"].asString();
+        const std::string account = (*payload)["account"].asString();
+        const std::string content = (*payload)["content"].asString();
+        if (videoId.empty()) {
+            body["success"] = false;
+            body["message"] = "视频 id 不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (account.empty() || userName.empty()) {
+            body["success"] = false;
+            body["message"] = "请先登录后再发表评论";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (content.empty() || utf8CharCount(content) > 200) {
+            body["success"] = false;
+            body["message"] = "评论内容需为 1 到 200 个字符";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<bitevideo::VideoComment> comment;
+        std::string error;
+        if (!videoStore_.addComment(
+                videoId, userName, account, content, comment, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /videos/comments failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "评论发送失败";
+            setJsonResponse(response, 500, body);
+        } else if (!comment) {
+            body["success"] = false;
+            body["message"] = "视频不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["message"] = "评论成功";
+            body["comment"] = commentToJson(*comment);
+            setJsonResponse(response, 200, body);
+        }
+    });
 }
 
 bool HttpServer::listen(const std::string& host, std::uint16_t port) {

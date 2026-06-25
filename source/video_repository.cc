@@ -53,6 +53,37 @@ bool videoFromRow(const bitedb::Database::QueryRow& row,
     return true;
 }
 
+bool videoExists(bitedb::Database& database,
+                 const std::string& escapedVideoId,
+                 bool& exists,
+                 std::string& error) {
+    exists = false;
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql = "SELECT 1 FROM videos WHERE status = 1 "
+        "AND video_id = '" + escapedVideoId + "' LIMIT 1";
+    if (!database.query(sql, rows, error)) {
+        return false;
+    }
+    exists = !rows.empty();
+    return true;
+}
+
+bool commentFromRow(const bitedb::Database::QueryRow& row,
+                    VideoComment& comment,
+                    std::string& error) {
+    if (row.size() != 6) {
+        error = "评论查询返回了不符合预期的字段数量";
+        return false;
+    }
+    comment.id = "comment-" + valueOrEmpty(row[0]);
+    comment.videoId = valueOrEmpty(row[1]);
+    comment.userName = valueOrEmpty(row[2]);
+    comment.account = valueOrEmpty(row[3]);
+    comment.content = valueOrEmpty(row[4]);
+    comment.createdAt = valueOrEmpty(row[5]);
+    return true;
+}
+
 }  // namespace
 
 MySqlVideoRepository::MySqlVideoRepository(bitedb::Database& database)
@@ -375,6 +406,102 @@ bool MySqlVideoRepository::setFavorited(
         return false;
     }
     return favoriteStatus(videoId, account, status, error);
+}
+
+bool MySqlVideoRepository::comments(
+    const std::string& videoId,
+    std::optional<std::vector<VideoComment>>& comments,
+    std::string& error) {
+    comments.reset();
+    std::string escapedVideoId;
+    if (!database_.escape(videoId, escapedVideoId, error)) {
+        return false;
+    }
+
+    bool exists = false;
+    if (!videoExists(database_, escapedVideoId, exists, error)) {
+        return false;
+    }
+    if (!exists) {
+        return true;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql =
+        "SELECT LPAD(id, 3, '0'), video_id, user_name, account, content, "
+        "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') FROM video_comments "
+        "WHERE video_id = '" + escapedVideoId +
+        "' ORDER BY created_at DESC, id DESC";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+
+    std::vector<VideoComment> result;
+    for (const auto& row : rows) {
+        VideoComment comment;
+        if (!commentFromRow(row, comment, error)) {
+            return false;
+        }
+        result.push_back(std::move(comment));
+    }
+    comments = std::move(result);
+    return true;
+}
+
+bool MySqlVideoRepository::addComment(
+    const std::string& videoId,
+    const std::string& userName,
+    const std::string& account,
+    const std::string& content,
+    std::optional<VideoComment>& comment,
+    std::string& error) {
+    comment.reset();
+    std::string escapedVideoId;
+    std::string escapedUserName;
+    std::string escapedAccount;
+    std::string escapedContent;
+    if (!database_.escape(videoId, escapedVideoId, error) ||
+        !database_.escape(userName, escapedUserName, error) ||
+        !database_.escape(account, escapedAccount, error) ||
+        !database_.escape(content, escapedContent, error)) {
+        return false;
+    }
+
+    bool exists = false;
+    if (!videoExists(database_, escapedVideoId, exists, error)) {
+        return false;
+    }
+    if (!exists) {
+        return true;
+    }
+
+    const std::string insertSql =
+        "INSERT INTO video_comments (video_id, user_name, account, content) "
+        "VALUES ('" + escapedVideoId + "', '" + escapedUserName + "', '" +
+        escapedAccount + "', '" + escapedContent + "')";
+    if (!database_.execute(insertSql, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string selectSql =
+        "SELECT LPAD(id, 3, '0'), video_id, user_name, account, content, "
+        "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') FROM video_comments "
+        "WHERE id = LAST_INSERT_ID()";
+    if (!database_.query(selectSql, rows, error)) {
+        return false;
+    }
+    if (rows.empty()) {
+        error = "评论保存后无法读取";
+        return false;
+    }
+
+    VideoComment saved;
+    if (!commentFromRow(rows.front(), saved, error)) {
+        return false;
+    }
+    comment = std::move(saved);
+    return true;
 }
 
 }  // namespace bitevideo

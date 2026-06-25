@@ -149,11 +149,43 @@ public:
         return true;
     }
 
+    bool comments(const std::string& videoId,
+                  std::optional<std::vector<bitevideo::VideoComment>>& comments,
+                  std::string& error) override {
+        error.clear();
+        if (videoId != "video-001") {
+            comments.reset();
+        } else {
+            comments = comments_;
+        }
+        return true;
+    }
+
+    bool addComment(const std::string& videoId,
+                    const std::string& userName,
+                    const std::string& account,
+                    const std::string& content,
+                    std::optional<bitevideo::VideoComment>& comment,
+                    std::string& error) override {
+        error.clear();
+        if (videoId != "video-001") {
+            comment.reset();
+            return true;
+        }
+        bitevideo::VideoComment saved{
+            "comment-001", videoId, userName, account, content,
+            "2026-06-25 11:40"};
+        comments_.insert(comments_.begin(), saved);
+        comment = saved;
+        return true;
+    }
+
 private:
     bool liked_ = false;
     int likeCount_ = 256;
     int watchSeconds_ = 0;
     bool favorited_ = false;
+    std::vector<bitevideo::VideoComment> comments_;
 };
 
 }  // namespace
@@ -398,6 +430,57 @@ int main() {
             missingFavoriteAccount->body);
         ok &= expect(body && !(*body)["success"].asBool(),
                      "POST /videos/favorite requires an account");
+    }
+
+    const auto initialComments = client.Get(
+        "/videos/comments?videoId=video-001");
+    if (initialComments) {
+        const auto body = biteutil::JSON::unserialize(initialComments->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["comments"].isArray() &&
+                         (*body)["comments"].empty(),
+                     "GET /videos/comments starts with an empty list");
+    }
+
+    const std::string commentBody =
+        R"({"videoId":"video-001","userName":"测试用户","account":"bit-user-001","content":"这是一条测试评论"})";
+    const auto sentComment = client.Post(
+        "/videos/comments", commentBody, "application/json");
+    if (sentComment) {
+        const auto body = biteutil::JSON::unserialize(sentComment->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["comment"]["content"].asString() ==
+                             "这是一条测试评论",
+                     "POST /videos/comments returns the saved comment");
+    }
+
+    const auto loadedComments = client.Get(
+        "/videos/comments?videoId=video-001");
+    if (loadedComments) {
+        const auto body = biteutil::JSON::unserialize(loadedComments->body);
+        ok &= expect(body && (*body)["comments"].size() == 1,
+                     "GET /videos/comments returns saved comments");
+    }
+
+    const auto missingCommentLogin = client.Post(
+        "/videos/comments",
+        R"({"videoId":"video-001","content":"未登录评论"})",
+        "application/json");
+    if (missingCommentLogin) {
+        const auto body = biteutil::JSON::unserialize(
+            missingCommentLogin->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos/comments requires login identity");
+    }
+
+    const auto emptyComment = client.Post(
+        "/videos/comments",
+        R"({"videoId":"video-001","userName":"测试用户","account":"bit-user-001","content":""})",
+        "application/json");
+    if (emptyComment) {
+        const auto body = biteutil::JSON::unserialize(emptyComment->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos/comments rejects empty content");
     }
 
     server.stop();

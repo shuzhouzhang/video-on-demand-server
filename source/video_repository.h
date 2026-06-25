@@ -25,6 +25,15 @@ struct FavoriteStatus {
     bool favorited;
 };
 
+struct VideoComment {
+    std::string id;
+    std::string videoId;
+    std::string userName;
+    std::string account;
+    std::string content;
+    std::string createdAt;
+};
+
 class VideoStore {
 public:
     virtual ~VideoStore() = default;
@@ -65,6 +74,15 @@ public:
                               bool shouldFavorite,
                               std::optional<FavoriteStatus>& status,
                               std::string& error) = 0;
+    virtual bool comments(const std::string& videoId,
+                          std::optional<std::vector<VideoComment>>& comments,
+                          std::string& error) = 0;
+    virtual bool addComment(const std::string& videoId,
+                            const std::string& userName,
+                            const std::string& account,
+                            const std::string& content,
+                            std::optional<VideoComment>& comment,
+                            std::string& error) = 0;
 };
 
 class MySqlVideoRepository : public VideoStore {
@@ -107,6 +125,15 @@ public:
                       bool shouldFavorite,
                       std::optional<FavoriteStatus>& status,
                       std::string& error) override;
+    bool comments(const std::string& videoId,
+                  std::optional<std::vector<VideoComment>>& comments,
+                  std::string& error) override;
+    bool addComment(const std::string& videoId,
+                    const std::string& userName,
+                    const std::string& account,
+                    const std::string& content,
+                    std::optional<VideoComment>& comment,
+                    std::string& error) override;
 
 private:
     bitedb::Database& database_;

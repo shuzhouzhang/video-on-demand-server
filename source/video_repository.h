@@ -21,6 +21,10 @@ struct WatchProgress {
     int seconds;
 };
 
+struct FavoriteStatus {
+    bool favorited;
+};
+
 class VideoStore {
 public:
     virtual ~VideoStore() = default;
@@ -49,6 +53,15 @@ public:
                                    int seconds,
                                    std::optional<WatchProgress>& progress,
                                    std::string& error) = 0;
+    virtual bool favoriteStatus(const std::string& videoId,
+                                const std::string& account,
+                                std::optional<FavoriteStatus>& status,
+                                std::string& error) = 0;
+    virtual bool setFavorited(const std::string& videoId,
+                              const std::string& account,
+                              bool shouldFavorite,
+                              std::optional<FavoriteStatus>& status,
+                              std::string& error) = 0;
 };
 
 class MySqlVideoRepository : public VideoStore {
@@ -79,6 +92,15 @@ public:
                            int seconds,
                            std::optional<WatchProgress>& progress,
                            std::string& error) override;
+    bool favoriteStatus(const std::string& videoId,
+                        const std::string& account,
+                        std::optional<FavoriteStatus>& status,
+                        std::string& error) override;
+    bool setFavorited(const std::string& videoId,
+                      const std::string& account,
+                      bool shouldFavorite,
+                      std::optional<FavoriteStatus>& status,
+                      std::string& error) override;
 
 private:
     bitedb::Database& database_;

@@ -326,6 +326,100 @@ void HttpServer::registerRoutes() {
             setJsonResponse(response, 200, body);
         }
     });
+
+    server_.Get("/videos/favorite-status",
+                [this](const httplib::Request& request,
+                       httplib::Response& response) {
+        Json::Value body;
+        const std::string videoId = request.has_param("videoId")
+            ? request.get_param_value("videoId") : "";
+        const std::string account = request.has_param("account")
+            ? request.get_param_value("account") : "";
+        if (videoId.empty() || account.empty()) {
+            body["success"] = false;
+            body["message"] = "视频 id 和账号不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<bitevideo::FavoriteStatus> status;
+        std::string error;
+        if (!videoStore_.favoriteStatus(videoId, account, status, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /videos/favorite-status failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "收藏状态暂时不可用";
+            setJsonResponse(response, 500, body);
+        } else if (!status) {
+            body["success"] = false;
+            body["message"] = "视频不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["favorited"] = status->favorited;
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    const auto changeFavorite = [this](const httplib::Request& request,
+                                       httplib::Response& response,
+                                       bool shouldFavorite) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::string videoId = (*payload)["videoId"].asString();
+        const std::string account = (*payload)["account"].asString();
+        if (videoId.empty()) {
+            body["success"] = false;
+            body["message"] = "视频 id 不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (account.empty()) {
+            body["success"] = false;
+            body["message"] = "请先登录后再收藏视频";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<bitevideo::FavoriteStatus> status;
+        std::string error;
+        if (!videoStore_.setFavorited(
+                videoId, account, shouldFavorite, status, error)) {
+            if (bitelog::g_logger) {
+                ERR("video favorite change failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "收藏操作暂时不可用";
+            setJsonResponse(response, 500, body);
+        } else if (!status) {
+            body["success"] = false;
+            body["message"] = "视频不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["favorited"] = status->favorited;
+            setJsonResponse(response, 200, body);
+        }
+    };
+
+    server_.Post("/videos/favorite",
+                 [changeFavorite](const httplib::Request& request,
+                                  httplib::Response& response) {
+                     changeFavorite(request, response, true);
+                 });
+    server_.Post("/videos/unfavorite",
+                 [changeFavorite](const httplib::Request& request,
+                                  httplib::Response& response) {
+                     changeFavorite(request, response, false);
+                 });
 }
 
 bool HttpServer::listen(const std::string& host, std::uint16_t port) {

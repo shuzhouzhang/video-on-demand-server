@@ -111,10 +111,37 @@ public:
         return true;
     }
 
+    bool favoriteStatus(const std::string& videoId,
+                        const std::string&,
+                        std::optional<bitevideo::FavoriteStatus>& status,
+                        std::string& error) override {
+        error.clear();
+        if (videoId != "video-001") {
+            status.reset();
+        } else {
+            status = bitevideo::FavoriteStatus{favorited_};
+        }
+        return true;
+    }
+
+    bool setFavorited(const std::string& videoId,
+                      const std::string& account,
+                      bool shouldFavorite,
+                      std::optional<bitevideo::FavoriteStatus>& status,
+                      std::string& error) override {
+        if (!favoriteStatus(videoId, account, status, error) || !status) {
+            return true;
+        }
+        favorited_ = shouldFavorite;
+        status = bitevideo::FavoriteStatus{favorited_};
+        return true;
+    }
+
 private:
     bool liked_ = false;
     int likeCount_ = 256;
     int watchSeconds_ = 0;
+    bool favorited_ = false;
 };
 
 }  // namespace
@@ -296,6 +323,53 @@ int main() {
         const auto body = biteutil::JSON::unserialize(missingProgress->body);
         ok &= expect(body && !(*body)["success"].asBool(),
                      "POST /videos/watch-progress rejects a missing video id");
+    }
+
+    const auto initialFavorite = client.Get(
+        "/videos/favorite-status?videoId=video-001&account=bit-user-001");
+    if (initialFavorite) {
+        const auto body = biteutil::JSON::unserialize(initialFavorite->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         !(*body)["favorited"].asBool(),
+                     "favorite status starts false");
+    }
+
+    const std::string favoriteBody =
+        R"({"videoId":"video-001","account":"bit-user-001"})";
+    const auto favorited = client.Post(
+        "/videos/favorite", favoriteBody, "application/json");
+    if (favorited) {
+        const auto body = biteutil::JSON::unserialize(favorited->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["favorited"].asBool(),
+                     "POST /videos/favorite marks the video as favorited");
+    }
+
+    const auto repeatedFavorite = client.Post(
+        "/videos/favorite", favoriteBody, "application/json");
+    if (repeatedFavorite) {
+        const auto body = biteutil::JSON::unserialize(repeatedFavorite->body);
+        ok &= expect(body && (*body)["favorited"].asBool(),
+                     "repeated favorite stays favorited");
+    }
+
+    const auto unfavorited = client.Post(
+        "/videos/unfavorite", favoriteBody, "application/json");
+    if (unfavorited) {
+        const auto body = biteutil::JSON::unserialize(unfavorited->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         !(*body)["favorited"].asBool(),
+                     "POST /videos/unfavorite clears favorite status");
+    }
+
+    const auto missingFavoriteAccount = client.Post(
+        "/videos/favorite", R"({"videoId":"video-001"})",
+        "application/json");
+    if (missingFavoriteAccount) {
+        const auto body = biteutil::JSON::unserialize(
+            missingFavoriteAccount->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos/favorite requires an account");
     }
 
     server.stop();

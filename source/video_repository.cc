@@ -284,4 +284,69 @@ bool MySqlVideoRepository::saveWatchProgress(
     return watchProgress(videoId, account, progress, error);
 }
 
+bool MySqlVideoRepository::favoriteStatus(
+    const std::string& videoId,
+    const std::string& account,
+    std::optional<FavoriteStatus>& status,
+    std::string& error) {
+    status.reset();
+    std::string escapedVideoId;
+    std::string escapedAccount;
+    if (!database_.escape(videoId, escapedVideoId, error) ||
+        !database_.escape(account, escapedAccount, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql =
+        "SELECT EXISTS(SELECT 1 FROM video_favorites vf "
+        "WHERE vf.video_id = v.video_id AND vf.account = '" +
+        escapedAccount + "') FROM videos v WHERE v.video_id = '" +
+        escapedVideoId + "' AND v.status = 1 LIMIT 1";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+    if (rows.empty()) {
+        return true;
+    }
+    if (rows.front().size() != 1) {
+        error = "收藏状态查询返回了不符合预期的字段数量";
+        return false;
+    }
+
+    status = FavoriteStatus{valueOrEmpty(rows.front()[0]) == "1"};
+    return true;
+}
+
+bool MySqlVideoRepository::setFavorited(
+    const std::string& videoId,
+    const std::string& account,
+    bool shouldFavorite,
+    std::optional<FavoriteStatus>& status,
+    std::string& error) {
+    if (!favoriteStatus(videoId, account, status, error)) {
+        return false;
+    }
+    if (!status) {
+        return true;
+    }
+
+    std::string escapedVideoId;
+    std::string escapedAccount;
+    if (!database_.escape(videoId, escapedVideoId, error) ||
+        !database_.escape(account, escapedAccount, error)) {
+        return false;
+    }
+
+    const std::string sql = shouldFavorite
+        ? "INSERT IGNORE INTO video_favorites (video_id, account) VALUES ('" +
+              escapedVideoId + "', '" + escapedAccount + "')"
+        : "DELETE FROM video_favorites WHERE video_id = '" + escapedVideoId +
+              "' AND account = '" + escapedAccount + "'";
+    if (!database_.execute(sql, error)) {
+        return false;
+    }
+    return favoriteStatus(videoId, account, status, error);
+}
+
 }  // namespace bitevideo

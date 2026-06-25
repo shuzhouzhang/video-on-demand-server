@@ -16,6 +16,17 @@ void setJsonResponse(httplib::Response& response,
         "application/json; charset=utf-8");
 }
 
+std::string accountOrGuest(const httplib::Request& request) {
+    return request.has_param("account") &&
+        !request.get_param_value("account").empty()
+        ? request.get_param_value("account") : "guest";
+}
+
+std::string accountOrGuest(const Json::Value& payload) {
+    const std::string account = payload["account"].asString();
+    return account.empty() ? "guest" : account;
+}
+
 }  // namespace
 
 HttpServer::HttpServer(bitevideo::VideoStore& videoStore)
@@ -199,6 +210,90 @@ void HttpServer::registerRoutes() {
                               httplib::Response& response) {
                      changeLike(request, response, false);
                  });
+
+    server_.Get("/videos/watch-progress",
+                [this](const httplib::Request& request,
+                       httplib::Response& response) {
+        Json::Value body;
+        const std::string videoId = request.has_param("videoId")
+            ? request.get_param_value("videoId") : "";
+        const std::string account = accountOrGuest(request);
+        if (videoId.empty()) {
+            body["success"] = false;
+            body["message"] = "视频 id 不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<bitevideo::WatchProgress> progress;
+        std::string error;
+        if (!videoStore_.watchProgress(videoId, account, progress, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /videos/watch-progress failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "播放进度暂时不可用";
+            setJsonResponse(response, 500, body);
+        } else if (!progress) {
+            body["success"] = false;
+            body["message"] = "视频不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["seconds"] = progress->seconds;
+            body["message"] = "读取成功";
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Post("/videos/watch-progress",
+                 [this](const httplib::Request& request,
+                        httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::string videoId = (*payload)["videoId"].asString();
+        const std::string account = accountOrGuest(*payload);
+        if (videoId.empty()) {
+            body["success"] = false;
+            body["message"] = "视频 id 不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (!(*payload)["seconds"].isInt() || (*payload)["seconds"].asInt() < 0) {
+            body["success"] = false;
+            body["message"] = "播放秒数非法";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<bitevideo::WatchProgress> progress;
+        std::string error;
+        if (!videoStore_.saveWatchProgress(
+                videoId, account, (*payload)["seconds"].asInt(), progress, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /videos/watch-progress failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "播放进度保存失败";
+            setJsonResponse(response, 500, body);
+        } else if (!progress) {
+            body["success"] = false;
+            body["message"] = "视频不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["seconds"] = progress->seconds;
+            body["message"] = "保存成功";
+            setJsonResponse(response, 200, body);
+        }
+    });
 }
 
 bool HttpServer::listen(const std::string& host, std::uint16_t port) {

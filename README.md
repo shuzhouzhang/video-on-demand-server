@@ -34,11 +34,14 @@ make migrate
 cp conf/server.json conf/server.local.json
 # 在 server.local.json 中填写本地数据库连接信息。
 ./database_migrate conf/server.local.json migrations/001_create_videos.sql
+./database_migrate conf/server.local.json migrations/002_create_video_likes.sql
+./database_migrate conf/server.local.json migrations/003_create_watch_progress.sql
 ./video_server conf/server.local.json
 curl http://127.0.0.1:9000/health
 curl http://127.0.0.1:9000/videos
 curl 'http://127.0.0.1:9000/videos/detail?id=video-001'
 curl 'http://127.0.0.1:9000/videos/like-status?videoId=video-001&account=bit-user-001'
+curl 'http://127.0.0.1:9000/videos/watch-progress?videoId=video-001&account=bit-user-001'
 ```
 
 `conf/server.local.json`包含本地凭据并已被 Git 忽略，不要将真实密码写入已跟踪的配置文件。

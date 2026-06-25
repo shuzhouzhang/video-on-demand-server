@@ -17,6 +17,10 @@ struct LikeStatus {
     std::string likeCount;
 };
 
+struct WatchProgress {
+    int seconds;
+};
+
 class VideoStore {
 public:
     virtual ~VideoStore() = default;
@@ -33,6 +37,15 @@ public:
                           bool shouldLike,
                           std::optional<LikeStatus>& status,
                           std::string& error) = 0;
+    virtual bool watchProgress(const std::string& videoId,
+                               const std::string& account,
+                               std::optional<WatchProgress>& progress,
+                               std::string& error) = 0;
+    virtual bool saveWatchProgress(const std::string& videoId,
+                                   const std::string& account,
+                                   int seconds,
+                                   std::optional<WatchProgress>& progress,
+                                   std::string& error) = 0;
 };
 
 class MySqlVideoRepository : public VideoStore {
@@ -51,6 +64,15 @@ public:
                   bool shouldLike,
                   std::optional<LikeStatus>& status,
                   std::string& error) override;
+    bool watchProgress(const std::string& videoId,
+                       const std::string& account,
+                       std::optional<WatchProgress>& progress,
+                       std::string& error) override;
+    bool saveWatchProgress(const std::string& videoId,
+                           const std::string& account,
+                           int seconds,
+                           std::optional<WatchProgress>& progress,
+                           std::string& error) override;
 
 private:
     bitedb::Database& database_;

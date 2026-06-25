@@ -180,4 +180,75 @@ bool MySqlVideoRepository::setLiked(
     return likeStatus(videoId, account, status, error);
 }
 
+bool MySqlVideoRepository::watchProgress(
+    const std::string& videoId,
+    const std::string& account,
+    std::optional<WatchProgress>& progress,
+    std::string& error) {
+    progress.reset();
+    std::string escapedVideoId;
+    std::string escapedAccount;
+    if (!database_.escape(videoId, escapedVideoId, error) ||
+        !database_.escape(account, escapedAccount, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql =
+        "SELECT COALESCE(wp.seconds, 0) FROM videos v "
+        "LEFT JOIN video_watch_progress wp "
+        "ON wp.video_id = v.video_id AND wp.account = '" + escapedAccount +
+        "' WHERE v.video_id = '" + escapedVideoId +
+        "' AND v.status = 1 LIMIT 1";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+    if (rows.empty()) {
+        return true;
+    }
+    if (rows.front().size() != 1) {
+        error = "播放进度查询返回了不符合预期的字段数量";
+        return false;
+    }
+
+    try {
+        progress = WatchProgress{std::stoi(valueOrEmpty(rows.front()[0]))};
+    } catch (const std::exception&) {
+        error = "播放进度不是有效数字";
+        return false;
+    }
+    return true;
+}
+
+bool MySqlVideoRepository::saveWatchProgress(
+    const std::string& videoId,
+    const std::string& account,
+    int seconds,
+    std::optional<WatchProgress>& progress,
+    std::string& error) {
+    if (!watchProgress(videoId, account, progress, error)) {
+        return false;
+    }
+    if (!progress) {
+        return true;
+    }
+
+    std::string escapedVideoId;
+    std::string escapedAccount;
+    if (!database_.escape(videoId, escapedVideoId, error) ||
+        !database_.escape(account, escapedAccount, error)) {
+        return false;
+    }
+
+    const std::string secondsValue = std::to_string(seconds);
+    const std::string sql =
+        "INSERT INTO video_watch_progress (video_id, account, seconds) "
+        "VALUES ('" + escapedVideoId + "', '" + escapedAccount + "', " +
+        secondsValue + ") ON DUPLICATE KEY UPDATE seconds = VALUES(seconds)";
+    if (!database_.execute(sql, error)) {
+        return false;
+    }
+    return watchProgress(videoId, account, progress, error);
+}
+
 }  // namespace bitevideo

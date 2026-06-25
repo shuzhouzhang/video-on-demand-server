@@ -74,9 +74,36 @@ public:
         return true;
     }
 
+    bool watchProgress(const std::string& videoId,
+                       const std::string&,
+                       std::optional<bitevideo::WatchProgress>& progress,
+                       std::string& error) override {
+        error.clear();
+        if (videoId != "video-001") {
+            progress.reset();
+        } else {
+            progress = bitevideo::WatchProgress{watchSeconds_};
+        }
+        return true;
+    }
+
+    bool saveWatchProgress(const std::string& videoId,
+                           const std::string& account,
+                           int seconds,
+                           std::optional<bitevideo::WatchProgress>& progress,
+                           std::string& error) override {
+        if (!watchProgress(videoId, account, progress, error) || !progress) {
+            return true;
+        }
+        watchSeconds_ = seconds;
+        progress = bitevideo::WatchProgress{watchSeconds_};
+        return true;
+    }
+
 private:
     bool liked_ = false;
     int likeCount_ = 256;
+    int watchSeconds_ = 0;
 };
 
 }  // namespace
@@ -185,6 +212,54 @@ int main() {
         ok &= expect(body && !(*body)["liked"].asBool() &&
                          (*body)["likeCount"].asString() == "256",
                      "POST /videos/unlike decrements once");
+    }
+
+    const auto initialProgress = client.Get(
+        "/videos/watch-progress?videoId=video-001&account=bit-user-001");
+    if (initialProgress) {
+        const auto body = biteutil::JSON::unserialize(initialProgress->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["seconds"].asInt() == 0,
+                     "watch progress defaults to zero");
+    }
+
+    const std::string progressBody =
+        R"({"videoId":"video-001","account":"bit-user-001","seconds":12})";
+    const auto savedProgress = client.Post(
+        "/videos/watch-progress", progressBody, "application/json");
+    if (savedProgress) {
+        const auto body = biteutil::JSON::unserialize(savedProgress->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["seconds"].asInt() == 12,
+                     "POST /videos/watch-progress saves seconds");
+    }
+
+    const auto loadedProgress = client.Get(
+        "/videos/watch-progress?videoId=video-001&account=bit-user-001");
+    if (loadedProgress) {
+        const auto body = biteutil::JSON::unserialize(loadedProgress->body);
+        ok &= expect(body && (*body)["seconds"].asInt() == 12,
+                     "saved watch progress can be loaded");
+    }
+
+    const auto invalidProgress = client.Post(
+        "/videos/watch-progress",
+        R"({"videoId":"video-001","account":"bit-user-001","seconds":-1})",
+        "application/json");
+    if (invalidProgress) {
+        const auto body = biteutil::JSON::unserialize(invalidProgress->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos/watch-progress rejects invalid seconds");
+    }
+
+    const auto missingProgress = client.Post(
+        "/videos/watch-progress",
+        R"({"account":"bit-user-001","seconds":12})",
+        "application/json");
+    if (missingProgress) {
+        const auto body = biteutil::JSON::unserialize(missingProgress->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos/watch-progress rejects a missing video id");
     }
 
     server.stop();

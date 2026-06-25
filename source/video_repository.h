@@ -39,6 +39,13 @@ struct VideoBarrage {
     std::string text;
 };
 
+struct UserProfile {
+    std::string account;
+    std::string userName;
+    std::string description;
+    std::string avatarPath;
+};
+
 class VideoStore {
 public:
     virtual ~VideoStore() = default;
@@ -99,6 +106,14 @@ public:
                             const std::string& text,
                             std::optional<VideoBarrage>& barrage,
                             std::string& error) = 0;
+    virtual bool userProfile(const std::string& account,
+                             std::optional<UserProfile>& profile,
+                             std::string& error) = 0;
+    virtual bool updateUserProfile(const std::string& account,
+                                   const std::string& userName,
+                                   const std::string& description,
+                                   std::optional<UserProfile>& profile,
+                                   std::string& error) = 0;
 };
 
 class MySqlVideoRepository : public VideoStore {
@@ -161,6 +176,14 @@ public:
                     const std::string& text,
                     std::optional<VideoBarrage>& barrage,
                     std::string& error) override;
+    bool userProfile(const std::string& account,
+                     std::optional<UserProfile>& profile,
+                     std::string& error) override;
+    bool updateUserProfile(const std::string& account,
+                           const std::string& userName,
+                           const std::string& description,
+                           std::optional<UserProfile>& profile,
+                           std::string& error) override;
 
 private:
     bitedb::Database& database_;

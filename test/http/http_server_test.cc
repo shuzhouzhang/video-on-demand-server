@@ -219,6 +219,34 @@ public:
         return true;
     }
 
+    bool userProfile(const std::string& account,
+                     std::optional<bitevideo::UserProfile>& profile,
+                     std::string& error) override {
+        error.clear();
+        if (account != "bit-user-001") {
+            profile.reset();
+        } else {
+            profile = user_;
+        }
+        return true;
+    }
+
+    bool updateUserProfile(const std::string& account,
+                           const std::string& userName,
+                           const std::string& description,
+                           std::optional<bitevideo::UserProfile>& profile,
+                           std::string& error) override {
+        error.clear();
+        if (account != "bit-user-001") {
+            profile.reset();
+            return true;
+        }
+        user_.userName = userName;
+        user_.description = description;
+        profile = user_;
+        return true;
+    }
+
 private:
     bool liked_ = false;
     int likeCount_ = 256;
@@ -226,6 +254,8 @@ private:
     bool favorited_ = false;
     std::vector<bitevideo::VideoComment> comments_;
     std::vector<bitevideo::VideoBarrage> barrages_;
+    bitevideo::UserProfile user_{
+        "bit-user-001", "BIT 用户", "真实后端用户资料", ""};
 };
 
 }  // namespace
@@ -606,6 +636,47 @@ int main() {
         const auto body = biteutil::JSON::unserialize(emptyBarrageText->body);
         ok &= expect(body && !(*body)["success"].asBool(),
                      "POST /videos/barrages rejects empty text");
+    }
+
+    const auto userProfile = client.Get(
+        "/users/profile?account=bit-user-001");
+    if (userProfile) {
+        const auto body = biteutil::JSON::unserialize(userProfile->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["user"]["account"].asString() ==
+                             "bit-user-001" &&
+                         (*body)["user"]["userName"].asString() == "BIT 用户",
+                     "GET /users/profile returns the current user profile");
+    }
+
+    const auto updatedProfile = client.Post(
+        "/users/profile",
+        R"({"account":"bit-user-001","userName":"新昵称","description":"新的简介"})",
+        "application/json");
+    if (updatedProfile) {
+        const auto body = biteutil::JSON::unserialize(updatedProfile->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["user"]["userName"].asString() == "新昵称" &&
+                         (*body)["user"]["description"].asString() == "新的简介",
+                     "POST /users/profile returns the updated user profile");
+    }
+
+    const auto unknownProfile = client.Get(
+        "/users/profile?account=missing-user");
+    if (unknownProfile) {
+        const auto body = biteutil::JSON::unserialize(unknownProfile->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "GET /users/profile reports an unknown user");
+    }
+
+    const auto invalidProfileName = client.Post(
+        "/users/profile",
+        R"({"account":"bit-user-001","userName":"","description":"新的简介"})",
+        "application/json");
+    if (invalidProfileName) {
+        const auto body = biteutil::JSON::unserialize(invalidProfileName->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /users/profile rejects an empty user name");
     }
 
     server.stop();

@@ -40,6 +40,7 @@ cp conf/server.json conf/server.local.json
 ./database_migrate conf/server.local.json migrations/005_add_video_play_url.sql
 ./database_migrate conf/server.local.json migrations/006_create_video_comments.sql
 ./database_migrate conf/server.local.json migrations/007_create_video_barrages.sql
+./database_migrate conf/server.local.json migrations/008_create_users.sql
 ./video_server conf/server.local.json
 curl http://127.0.0.1:9000/health
 curl http://127.0.0.1:9000/videos
@@ -50,6 +51,7 @@ curl 'http://127.0.0.1:9000/videos/like-status?videoId=video-001&account=bit-use
 curl 'http://127.0.0.1:9000/videos/watch-progress?videoId=video-001&account=bit-user-001'
 curl 'http://127.0.0.1:9000/videos/favorite-status?videoId=video-001&account=bit-user-001'
 curl 'http://127.0.0.1:9000/users/favorites?account=bit-user-001'
+curl 'http://127.0.0.1:9000/users/profile?account=bit-user-001'
 curl 'http://127.0.0.1:9000/videos/comments?videoId=video-001'
 curl 'http://127.0.0.1:9000/videos/barrages?videoId=video-001'
 ```

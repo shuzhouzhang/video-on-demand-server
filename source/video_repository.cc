@@ -101,6 +101,20 @@ bool barrageFromRow(const bitedb::Database::QueryRow& row,
     return true;
 }
 
+bool profileFromRow(const bitedb::Database::QueryRow& row,
+                    UserProfile& profile,
+                    std::string& error) {
+    if (row.size() != 4) {
+        error = "用户资料查询返回了不符合预期的字段数量";
+        return false;
+    }
+    profile.account = valueOrEmpty(row[0]);
+    profile.userName = valueOrEmpty(row[1]);
+    profile.description = valueOrEmpty(row[2]);
+    profile.avatarPath = valueOrEmpty(row[3]);
+    return true;
+}
+
 }  // namespace
 
 MySqlVideoRepository::MySqlVideoRepository(bitedb::Database& database)
@@ -624,6 +638,66 @@ bool MySqlVideoRepository::addBarrage(
     }
     barrage = VideoBarrage{seconds, text};
     return true;
+}
+
+bool MySqlVideoRepository::userProfile(const std::string& account,
+                                       std::optional<UserProfile>& profile,
+                                       std::string& error) {
+    profile.reset();
+    std::string escapedAccount;
+    if (!database_.escape(account, escapedAccount, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql =
+        "SELECT account, user_name, description, avatar_path FROM users "
+        "WHERE account = '" + escapedAccount + "' LIMIT 1";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+    if (rows.empty()) {
+        return true;
+    }
+
+    UserProfile found;
+    if (!profileFromRow(rows.front(), found, error)) {
+        return false;
+    }
+    profile = std::move(found);
+    return true;
+}
+
+bool MySqlVideoRepository::updateUserProfile(
+    const std::string& account,
+    const std::string& userName,
+    const std::string& description,
+    std::optional<UserProfile>& profile,
+    std::string& error) {
+    if (!userProfile(account, profile, error)) {
+        return false;
+    }
+    if (!profile) {
+        return true;
+    }
+
+    std::string escapedAccount;
+    std::string escapedUserName;
+    std::string escapedDescription;
+    if (!database_.escape(account, escapedAccount, error) ||
+        !database_.escape(userName, escapedUserName, error) ||
+        !database_.escape(description, escapedDescription, error)) {
+        return false;
+    }
+
+    const std::string sql =
+        "UPDATE users SET user_name = '" + escapedUserName +
+        "', description = '" + escapedDescription +
+        "' WHERE account = '" + escapedAccount + "'";
+    if (!database_.execute(sql, error)) {
+        return false;
+    }
+    return userProfile(account, profile, error);
 }
 
 }  // namespace bitevideo

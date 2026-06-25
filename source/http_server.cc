@@ -79,6 +79,15 @@ Json::Value barrageToJson(const bitevideo::VideoBarrage& barrage) {
     return value;
 }
 
+Json::Value userProfileToJson(const bitevideo::UserProfile& profile) {
+    Json::Value value;
+    value["account"] = profile.account;
+    value["userName"] = profile.userName;
+    value["description"] = profile.description;
+    value["avatarPath"] = profile.avatarPath;
+    return value;
+}
+
 }  // namespace
 
 HttpServer::HttpServer(bitevideo::VideoStore& videoStore)
@@ -718,6 +727,93 @@ void HttpServer::registerRoutes() {
             body["message"] = "发送成功";
             body["seconds"] = barrage->seconds;
             body["text"] = barrage->text;
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Get("/users/profile", [this](const httplib::Request& request,
+                                         httplib::Response& response) {
+        Json::Value body;
+        const std::string account = request.has_param("account")
+            ? request.get_param_value("account") : "";
+        if (account.empty()) {
+            body["success"] = false;
+            body["message"] = "用户不存在";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<bitevideo::UserProfile> profile;
+        std::string error;
+        if (!videoStore_.userProfile(account, profile, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /users/profile failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "个人资料暂时不可用";
+            setJsonResponse(response, 500, body);
+        } else if (!profile) {
+            body["success"] = false;
+            body["message"] = "用户不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["user"] = userProfileToJson(*profile);
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Post("/users/profile", [this](const httplib::Request& request,
+                                          httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::string account = (*payload)["account"].asString();
+        const std::string userName = (*payload)["userName"].asString();
+        const std::string description = (*payload)["description"].asString();
+        if (account.empty()) {
+            body["success"] = false;
+            body["message"] = "用户不存在";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (userName.empty() || utf8CharCount(userName) > 20) {
+            body["success"] = false;
+            body["message"] = "昵称需为 1 到 20 个字符";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (utf8CharCount(description) > 100) {
+            body["success"] = false;
+            body["message"] = "个人简介不能超过 100 个字符";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<bitevideo::UserProfile> profile;
+        std::string error;
+        if (!videoStore_.updateUserProfile(
+                account, userName, description, profile, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /users/profile failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "个人资料保存失败";
+            setJsonResponse(response, 500, body);
+        } else if (!profile) {
+            body["success"] = false;
+            body["message"] = "用户不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["message"] = "保存成功";
+            body["user"] = userProfileToJson(*profile);
             setJsonResponse(response, 200, body);
         }
     });

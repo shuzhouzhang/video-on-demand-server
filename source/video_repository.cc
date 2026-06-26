@@ -119,6 +119,36 @@ bool profileFromRow(const bitedb::Database::QueryRow& row,
     return true;
 }
 
+bool reviewFromRow(const bitedb::Database::QueryRow& row,
+                   AdminReview& review,
+                   std::string& error) {
+    if (row.size() != 5) {
+        error = "审核列表查询返回了不符合预期的字段数量";
+        return false;
+    }
+    review.videoId = valueOrEmpty(row[0]);
+    review.title = valueOrEmpty(row[1]);
+    review.userId = valueOrEmpty(row[2]);
+    review.status = valueOrEmpty(row[3]);
+    review.uploadTime = valueOrEmpty(row[4]);
+    return true;
+}
+
+bool adminUserFromRow(const bitedb::Database::QueryRow& row,
+                      AdminUser& user,
+                      std::string& error) {
+    if (row.size() != 5) {
+        error = "后台用户列表查询返回了不符合预期的字段数量";
+        return false;
+    }
+    user.account = valueOrEmpty(row[0]);
+    user.userName = valueOrEmpty(row[1]);
+    user.role = valueOrEmpty(row[2]);
+    user.status = valueOrEmpty(row[3]);
+    user.createdAt = valueOrEmpty(row[4]);
+    return true;
+}
+
 std::string lowerCopy(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(),
                    [](unsigned char ch) {
@@ -897,6 +927,137 @@ bool MySqlVideoRepository::logout(const std::string& account,
         return false;
     }
     knownUser = profile.has_value();
+    return true;
+}
+
+bool MySqlVideoRepository::adminReviews(std::vector<AdminReview>& reviews,
+                                        std::string& error) {
+    reviews.clear();
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql =
+        "SELECT video_id, title, owner_account, review_status, "
+        "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') "
+        "FROM videos ORDER BY created_at DESC, id DESC";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+
+    for (const auto& row : rows) {
+        AdminReview review;
+        if (!reviewFromRow(row, review, error)) {
+            reviews.clear();
+            return false;
+        }
+        reviews.push_back(std::move(review));
+    }
+    return true;
+}
+
+bool MySqlVideoRepository::updateReviewStatus(const std::string& videoId,
+                                              const std::string& status,
+                                              bool& updated,
+                                              std::string& error) {
+    updated = false;
+    if (status != "审核通过" && status != "审核拒绝") {
+        error = "审核参数错误";
+        return true;
+    }
+
+    std::string escapedVideoId;
+    std::string escapedStatus;
+    if (!database_.escape(videoId, escapedVideoId, error) ||
+        !database_.escape(status, escapedStatus, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string existsSql =
+        "SELECT 1 FROM videos WHERE video_id = '" + escapedVideoId +
+        "' LIMIT 1";
+    if (!database_.query(existsSql, rows, error)) {
+        return false;
+    }
+    if (rows.empty()) {
+        error = "审核参数错误";
+        return true;
+    }
+
+    const std::string updateSql =
+        "UPDATE videos SET review_status = '" + escapedStatus +
+        "' WHERE video_id = '" + escapedVideoId + "'";
+    if (!database_.execute(updateSql, error)) {
+        return false;
+    }
+    updated = true;
+    return true;
+}
+
+bool MySqlVideoRepository::adminUsers(std::vector<AdminUser>& users,
+                                      std::string& error) {
+    users.clear();
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string sql =
+        "SELECT account, user_name, role, status, "
+        "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') "
+        "FROM users ORDER BY created_at ASC, id ASC";
+    if (!database_.query(sql, rows, error)) {
+        return false;
+    }
+
+    for (const auto& row : rows) {
+        AdminUser user;
+        if (!adminUserFromRow(row, user, error)) {
+            users.clear();
+            return false;
+        }
+        users.push_back(std::move(user));
+    }
+    return true;
+}
+
+bool MySqlVideoRepository::updateAdminUser(const std::string& account,
+                                           const std::string& action,
+                                           bool& updated,
+                                           std::string& error) {
+    updated = false;
+    std::string escapedAccount;
+    if (!database_.escape(account, escapedAccount, error)) {
+        return false;
+    }
+
+    std::vector<bitedb::Database::QueryRow> rows;
+    const std::string existsSql =
+        "SELECT 1 FROM users WHERE account = '" + escapedAccount +
+        "' LIMIT 1";
+    if (!database_.query(existsSql, rows, error)) {
+        return false;
+    }
+    if (rows.empty()) {
+        error = "用户不存在";
+        return true;
+    }
+
+    std::string sql;
+    if (action == "set-admin") {
+        sql = "UPDATE users SET role = '管理员' WHERE account = '" +
+            escapedAccount + "'";
+    } else if (action == "disable") {
+        sql = "UPDATE users SET status = '禁用' WHERE account = '" +
+            escapedAccount + "'";
+    } else if (action == "enable") {
+        sql = "UPDATE users SET status = '启用' WHERE account = '" +
+            escapedAccount + "'";
+    } else if (action == "delete") {
+        sql = "DELETE FROM users WHERE account = '" + escapedAccount + "'";
+    } else {
+        error = "角色操作不支持";
+        return true;
+    }
+
+    if (!database_.execute(sql, error)) {
+        return false;
+    }
+    updated = true;
     return true;
 }
 

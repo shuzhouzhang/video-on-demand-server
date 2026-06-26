@@ -308,6 +308,65 @@ public:
         return true;
     }
 
+    bool adminReviews(std::vector<bitevideo::AdminReview>& reviews,
+                      std::string& error) override {
+        error.clear();
+        reviews = {review_};
+        return true;
+    }
+
+    bool updateReviewStatus(const std::string& videoId,
+                            const std::string& status,
+                            bool& updated,
+                            std::string& error) override {
+        error.clear();
+        updated = false;
+        if (videoId != review_.videoId ||
+            (status != "审核通过" && status != "审核拒绝")) {
+            error = "审核参数错误";
+            return true;
+        }
+        review_.status = status;
+        updated = true;
+        return true;
+    }
+
+    bool adminUsers(std::vector<bitevideo::AdminUser>& users,
+                    std::string& error) override {
+        error.clear();
+        users = users_;
+        return true;
+    }
+
+    bool updateAdminUser(const std::string& account,
+                         const std::string& action,
+                         bool& updated,
+                         std::string& error) override {
+        error.clear();
+        updated = false;
+        for (auto it = users_.begin(); it != users_.end(); ++it) {
+            if (it->account != account) {
+                continue;
+            }
+            if (action == "set-admin") {
+                it->role = "管理员";
+            } else if (action == "disable") {
+                it->status = "禁用";
+            } else if (action == "enable") {
+                it->status = "启用";
+            } else if (action == "delete") {
+                users_.erase(it);
+            } else {
+                error = "角色操作不支持";
+                return true;
+            }
+            updated = true;
+            return true;
+        }
+        error = "用户不存在";
+        return true;
+    }
+
 private:
     bool liked_ = false;
     int likeCount_ = 256;
@@ -318,6 +377,14 @@ private:
     bitevideo::UserProfile user_{
         "bit-user-001", "BIT 用户", "真实后端用户资料", ""};
     std::string email_;
+    bitevideo::AdminReview review_{
+        "video-001", "测试视频", "bit-user-001", "待审核",
+        "2026-06-25 12:00"};
+    std::vector<bitevideo::AdminUser> users_{
+        {"admin@bit.com", "系统管理员", "超级管理员", "启用",
+         "2026-05-01 10:00"},
+        {"bit-user-001", "BIT 用户", "普通用户", "启用",
+         "2026-06-01 09:00"}};
 };
 
 }  // namespace
@@ -825,6 +892,66 @@ int main() {
         const auto body = biteutil::JSON::unserialize(invalidProfileName->body);
         ok &= expect(body && !(*body)["success"].asBool(),
                      "POST /users/profile rejects an empty user name");
+    }
+
+    const auto adminReviews = client.Get("/admin/reviews");
+    if (adminReviews) {
+        const auto body = biteutil::JSON::unserialize(adminReviews->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["reviews"].isArray() &&
+                         (*body)["reviews"].size() == 1 &&
+                         (*body)["reviews"][0]["status"].asString() == "待审核",
+                     "GET /admin/reviews returns review rows");
+    }
+
+    const auto reviewAction = client.Post(
+        "/admin/reviews/action",
+        R"({"videoId":"video-001","status":"审核通过"})",
+        "application/json");
+    if (reviewAction) {
+        const auto body = biteutil::JSON::unserialize(reviewAction->body);
+        ok &= expect(body && (*body)["success"].asBool(),
+                     "POST /admin/reviews/action updates review status");
+    }
+
+    const auto invalidReviewAction = client.Post(
+        "/admin/reviews/action",
+        R"({"videoId":"video-001","status":"未知状态"})",
+        "application/json");
+    if (invalidReviewAction) {
+        const auto body = biteutil::JSON::unserialize(
+            invalidReviewAction->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /admin/reviews/action rejects invalid status");
+    }
+
+    const auto adminUsers = client.Get("/admin/users");
+    if (adminUsers) {
+        const auto body = biteutil::JSON::unserialize(adminUsers->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["users"].isArray() &&
+                         (*body)["users"].size() == 2,
+                     "GET /admin/users returns user rows");
+    }
+
+    const auto userAction = client.Post(
+        "/admin/users/action",
+        R"({"account":"bit-user-001","action":"disable"})",
+        "application/json");
+    if (userAction) {
+        const auto body = biteutil::JSON::unserialize(userAction->body);
+        ok &= expect(body && (*body)["success"].asBool(),
+                     "POST /admin/users/action updates a user");
+    }
+
+    const auto invalidUserAction = client.Post(
+        "/admin/users/action",
+        R"({"account":"bit-user-001","action":"unknown"})",
+        "application/json");
+    if (invalidUserAction) {
+        const auto body = biteutil::JSON::unserialize(invalidUserAction->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /admin/users/action rejects unsupported actions");
     }
 
     server.stop();

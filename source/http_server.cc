@@ -91,6 +91,26 @@ Json::Value userProfileToJson(const bitevideo::UserProfile& profile) {
     return value;
 }
 
+Json::Value adminReviewToJson(const bitevideo::AdminReview& review) {
+    Json::Value value;
+    value["videoId"] = review.videoId;
+    value["title"] = review.title;
+    value["userId"] = review.userId;
+    value["status"] = review.status;
+    value["uploadTime"] = review.uploadTime;
+    return value;
+}
+
+Json::Value adminUserToJson(const bitevideo::AdminUser& user) {
+    Json::Value value;
+    value["account"] = user.account;
+    value["userName"] = user.userName;
+    value["role"] = user.role;
+    value["status"] = user.status;
+    value["createdAt"] = user.createdAt;
+    return value;
+}
+
 std::string trimCopy(std::string value) {
     const auto notSpace = [](unsigned char ch) {
         return !std::isspace(ch);
@@ -1005,6 +1025,120 @@ void HttpServer::registerRoutes() {
             body["success"] = true;
             body["message"] = "保存成功";
             body["user"] = userProfileToJson(*profile);
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Get("/admin/reviews", [this](const httplib::Request&,
+                                         httplib::Response& response) {
+        Json::Value body;
+        std::vector<bitevideo::AdminReview> reviews;
+        std::string error;
+        if (!videoStore_.adminReviews(reviews, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /admin/reviews failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "审核列表暂时不可用";
+            setJsonResponse(response, 500, body);
+            return;
+        }
+
+        body["success"] = true;
+        body["reviews"] = Json::arrayValue;
+        for (const auto& review : reviews) {
+            body["reviews"].append(adminReviewToJson(review));
+        }
+        setJsonResponse(response, 200, body);
+    });
+
+    server_.Post("/admin/reviews/action",
+                 [this](const httplib::Request& request,
+                        httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        bool updated = false;
+        std::string error;
+        const std::string videoId = trimCopy((*payload)["videoId"].asString());
+        const std::string status = trimCopy((*payload)["status"].asString());
+        if (!videoStore_.updateReviewStatus(videoId, status, updated, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /admin/reviews/action failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "审核状态更新失败";
+            setJsonResponse(response, 500, body);
+        } else if (!updated) {
+            body["success"] = false;
+            body["message"] = error.empty() ? "审核参数错误" : error;
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["message"] = "审核状态已更新";
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Get("/admin/users", [this](const httplib::Request&,
+                                      httplib::Response& response) {
+        Json::Value body;
+        std::vector<bitevideo::AdminUser> users;
+        std::string error;
+        if (!videoStore_.adminUsers(users, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /admin/users failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "用户列表暂时不可用";
+            setJsonResponse(response, 500, body);
+            return;
+        }
+
+        body["success"] = true;
+        body["users"] = Json::arrayValue;
+        for (const auto& user : users) {
+            body["users"].append(adminUserToJson(user));
+        }
+        setJsonResponse(response, 200, body);
+    });
+
+    server_.Post("/admin/users/action",
+                 [this](const httplib::Request& request,
+                        httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        bool updated = false;
+        std::string error;
+        const std::string account = trimCopy((*payload)["account"].asString());
+        const std::string action = trimCopy((*payload)["action"].asString());
+        if (!videoStore_.updateAdminUser(account, action, updated, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /admin/users/action failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "角色操作失败";
+            setJsonResponse(response, 500, body);
+        } else if (!updated) {
+            body["success"] = false;
+            body["message"] = error.empty() ? "角色操作不支持" : error;
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["message"] = "角色操作成功";
             setJsonResponse(response, 200, body);
         }
     });

@@ -51,6 +51,22 @@ struct EmailCodeSession {
     std::string debugCode;
 };
 
+struct AdminReview {
+    std::string videoId;
+    std::string title;
+    std::string userId;
+    std::string status;
+    std::string uploadTime;
+};
+
+struct AdminUser {
+    std::string account;
+    std::string userName;
+    std::string role;
+    std::string status;
+    std::string createdAt;
+};
+
 class VideoStore {
 public:
     virtual ~VideoStore() = default;
@@ -137,6 +153,18 @@ public:
     virtual bool logout(const std::string& account,
                         bool& knownUser,
                         std::string& error) = 0;
+    virtual bool adminReviews(std::vector<AdminReview>& reviews,
+                              std::string& error) = 0;
+    virtual bool updateReviewStatus(const std::string& videoId,
+                                    const std::string& status,
+                                    bool& updated,
+                                    std::string& error) = 0;
+    virtual bool adminUsers(std::vector<AdminUser>& users,
+                            std::string& error) = 0;
+    virtual bool updateAdminUser(const std::string& account,
+                                 const std::string& action,
+                                 bool& updated,
+                                 std::string& error) = 0;
 };
 
 class MySqlVideoRepository : public VideoStore {
@@ -225,6 +253,18 @@ public:
     bool logout(const std::string& account,
                 bool& knownUser,
                 std::string& error) override;
+    bool adminReviews(std::vector<AdminReview>& reviews,
+                      std::string& error) override;
+    bool updateReviewStatus(const std::string& videoId,
+                            const std::string& status,
+                            bool& updated,
+                            std::string& error) override;
+    bool adminUsers(std::vector<AdminUser>& users,
+                    std::string& error) override;
+    bool updateAdminUser(const std::string& account,
+                         const std::string& action,
+                         bool& updated,
+                         std::string& error) override;
 
 private:
     bitedb::Database& database_;

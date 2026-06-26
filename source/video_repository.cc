@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iomanip>
 #include <regex>
+#include <sstream>
 
 namespace bitevideo {
 namespace {
@@ -165,6 +167,12 @@ std::string nameFromEmail(const std::string& email) {
     return email.substr(0, at);
 }
 
+std::string makeVideoId(unsigned long long nextId) {
+    std::ostringstream out;
+    out << "video-" << std::setw(3) << std::setfill('0') << nextId;
+    return out.str();
+}
+
 }  // namespace
 
 MySqlVideoRepository::MySqlVideoRepository(bitedb::Database& database)
@@ -189,6 +197,77 @@ bool MySqlVideoRepository::list(std::vector<Video>& videos,
         videos.push_back(std::move(video));
     }
     return true;
+}
+
+bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
+                                       std::optional<Video>& video,
+                                       std::string& error) {
+    video.reset();
+    std::vector<bitedb::Database::QueryRow> rows;
+    if (!database_.query("SELECT COALESCE(MAX(id), 0) + 1 FROM videos",
+                         rows, error)) {
+        return false;
+    }
+    if (rows.empty() || rows.front().empty()) {
+        error = "无法生成视频编号";
+        return false;
+    }
+
+    unsigned long long nextId = 0;
+    try {
+        nextId = std::stoull(valueOrEmpty(rows.front()[0]));
+    } catch (const std::exception&) {
+        error = "视频编号不是有效数字";
+        return false;
+    }
+
+    const std::string videoId = makeVideoId(nextId);
+    Json::Value tagArray(Json::arrayValue);
+    for (const auto& tag : draft.tags) {
+        tagArray.append(tag);
+    }
+    const auto tagsJson = biteutil::JSON::serialize(tagArray);
+    if (!tagsJson) {
+        error = "视频标签序列化失败";
+        return false;
+    }
+
+    std::string escapedVideoId;
+    std::string escapedTitle;
+    std::string escapedUserName;
+    std::string escapedAccount;
+    std::string escapedCategory;
+    std::string escapedTags;
+    std::string escapedDescription;
+    std::string escapedVideoFileName;
+    std::string escapedCoverFileName;
+    if (!database_.escape(videoId, escapedVideoId, error) ||
+        !database_.escape(draft.title, escapedTitle, error) ||
+        !database_.escape(draft.userName, escapedUserName, error) ||
+        !database_.escape(draft.account, escapedAccount, error) ||
+        !database_.escape(draft.category, escapedCategory, error) ||
+        !database_.escape(*tagsJson, escapedTags, error) ||
+        !database_.escape(draft.description, escapedDescription, error) ||
+        !database_.escape(draft.videoFileName, escapedVideoFileName, error) ||
+        !database_.escape(draft.coverFileName, escapedCoverFileName, error)) {
+        return false;
+    }
+
+    const std::string sql =
+        "INSERT INTO videos (video_id, title, user_name, owner_account, "
+        "published_on, duration_seconds, play_count, like_count, category, "
+        "tags, description, play_url, video_file_name, cover_file_name, "
+        "status, review_status) VALUES ('" + escapedVideoId + "', '" +
+        escapedTitle + "', '" + escapedUserName + "', '" + escapedAccount +
+        "', CURDATE(), 0, 0, 0, '" + escapedCategory + "', '" +
+        escapedTags + "', '" + escapedDescription + "', '" +
+        escapedVideoFileName + "', '" + escapedVideoFileName + "', '" +
+        escapedCoverFileName + "', 1, '待审核')";
+    if (!database_.execute(sql, error)) {
+        return false;
+    }
+
+    return findById(videoId, video, error);
 }
 
 bool MySqlVideoRepository::findById(const std::string& videoId,

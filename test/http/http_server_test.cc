@@ -21,9 +21,18 @@ public:
     bool list(std::vector<bitevideo::Video>& videos,
               std::string& error) override {
         error.clear();
-        videos = {{"video-001", "测试视频", "测试用户", "6-23", 558,
-                   "36000", "256", "科技", {"编程开发", "软件工具"},
-                   "HTTP测试数据"}};
+        videos = {baseVideo_};
+        return true;
+    }
+
+    bool createVideo(const bitevideo::VideoDraft& draft,
+                     std::optional<bitevideo::Video>& video,
+                     std::string& error) override {
+        error.clear();
+        createdVideo_ = bitevideo::Video{
+            "video-003", draft.title, draft.userName, "6-25", 0,
+            "0", "0", draft.category, draft.tags, draft.description};
+        video = createdVideo_;
         return true;
     }
 
@@ -32,10 +41,9 @@ public:
                   std::string& error) override {
         error.clear();
         if (videoId == "video-001") {
-            video = bitevideo::Video{
-                "video-001", "测试视频", "测试用户", "6-23", 558,
-                "36000", "256", "科技", {"编程开发", "软件工具"},
-                "HTTP测试数据"};
+            video = baseVideo_;
+        } else if (videoId == "video-003") {
+            video = createdVideo_;
         } else {
             video.reset();
         }
@@ -368,6 +376,11 @@ public:
     }
 
 private:
+    bitevideo::Video baseVideo_{
+        "video-001", "测试视频", "测试用户", "6-23", 558,
+        "36000", "256", "科技", {"编程开发", "软件工具"},
+        "HTTP测试数据"};
+    bitevideo::Video createdVideo_;
     bool liked_ = false;
     int likeCount_ = 256;
     int watchSeconds_ = 0;
@@ -491,6 +504,62 @@ int main() {
                          (*body)[0]["duration"].asString() == "09:18" &&
                          (*body)[0]["tags"].isArray(),
                      "GET /videos matches the client contract");
+    }
+
+    const auto createdVideo = client.Post(
+        "/videos",
+        R"({"title":"新发布视频","account":"bit-user-001","userName":"BIT 用户","category":"科技","tags":["后端"],"description":"元数据发布","videoFileName":"new-video.mp4","coverFileName":"new-cover.jpg"})",
+        "application/json");
+    if (createdVideo) {
+        const auto body = biteutil::JSON::unserialize(createdVideo->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["video"]["id"].asString() == "video-003" &&
+                         (*body)["video"]["videoFileName"].asString() ==
+                             "new-video.mp4",
+                     "POST /videos creates a metadata-only video");
+    }
+
+    const auto missingVideoTitle = client.Post(
+        "/videos",
+        R"({"account":"bit-user-001","category":"科技","videoFileName":"new-video.mp4"})",
+        "application/json");
+    if (missingVideoTitle) {
+        const auto body = biteutil::JSON::unserialize(missingVideoTitle->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos rejects a missing title");
+    }
+
+    const auto missingVideoAccount = client.Post(
+        "/videos",
+        R"({"title":"新发布视频","category":"科技","videoFileName":"new-video.mp4"})",
+        "application/json");
+    if (missingVideoAccount) {
+        const auto body = biteutil::JSON::unserialize(
+            missingVideoAccount->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos rejects a missing account");
+    }
+
+    const auto missingVideoCategory = client.Post(
+        "/videos",
+        R"({"title":"新发布视频","account":"bit-user-001","videoFileName":"new-video.mp4"})",
+        "application/json");
+    if (missingVideoCategory) {
+        const auto body = biteutil::JSON::unserialize(
+            missingVideoCategory->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos rejects a missing category");
+    }
+
+    const auto missingVideoFileName = client.Post(
+        "/videos",
+        R"({"title":"新发布视频","account":"bit-user-001","category":"科技"})",
+        "application/json");
+    if (missingVideoFileName) {
+        const auto body = biteutil::JSON::unserialize(
+            missingVideoFileName->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos rejects a missing video file name");
     }
 
     const auto detail = client.Get("/videos/detail?id=video-001");

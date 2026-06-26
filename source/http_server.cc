@@ -178,6 +178,87 @@ void HttpServer::registerRoutes() {
             "application/json; charset=utf-8");
     });
 
+    server_.Post("/videos", [this](const httplib::Request& request,
+                                   httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        bitevideo::VideoDraft draft;
+        draft.title = trimCopy((*payload)["title"].asString());
+        draft.account = trimCopy((*payload)["account"].asString());
+        draft.category = trimCopy((*payload)["category"].asString());
+        draft.userName = trimCopy((*payload)["userName"].asString());
+        draft.description = trimCopy((*payload)["description"].asString());
+        draft.videoFileName = trimCopy((*payload)["videoFileName"].asString());
+        draft.coverFileName = trimCopy((*payload)["coverFileName"].asString());
+        if (draft.userName.empty()) {
+            draft.userName = draft.account;
+        }
+        const Json::Value& tags = (*payload)["tags"];
+        if (tags.isArray()) {
+            for (const Json::Value& tag : tags) {
+                if (tag.isString() && !tag.asString().empty()) {
+                    draft.tags.push_back(tag.asString());
+                }
+            }
+        }
+
+        if (draft.title.empty()) {
+            body["success"] = false;
+            body["message"] = "视频标题不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (draft.account.empty()) {
+            body["success"] = false;
+            body["message"] = "请先登录后再发布";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (draft.category.empty()) {
+            body["success"] = false;
+            body["message"] = "请选择视频分类";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (draft.videoFileName.empty()) {
+            body["success"] = false;
+            body["message"] = "请先选择视频文件";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<bitevideo::Video> video;
+        std::string error;
+        if (!videoStore_.createVideo(draft, video, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /videos failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "视频发布失败";
+            setJsonResponse(response, 500, body);
+        } else if (!video) {
+            body["success"] = false;
+            body["message"] = "视频发布失败";
+            setJsonResponse(response, 500, body);
+        } else {
+            Json::Value videoJson = bitevideo::toJson(*video);
+            videoJson["ownerAccount"] = draft.account;
+            videoJson["videoFileName"] = draft.videoFileName;
+            videoJson["coverFileName"] = draft.coverFileName;
+            body["success"] = true;
+            body["message"] = "发布成功";
+            body["video"] = videoJson;
+            setJsonResponse(response, 200, body);
+        }
+    });
+
     server_.Post("/login", [this](const httplib::Request& request,
                                   httplib::Response& response) {
         Json::Value body;

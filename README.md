@@ -44,10 +44,12 @@ cp conf/server.json conf/server.local.json
 ./database_migrate conf/server.local.json migrations/009_add_video_owner_account.sql
 ./database_migrate conf/server.local.json migrations/010_add_login_fields.sql
 ./database_migrate conf/server.local.json migrations/011_add_admin_fields.sql
+./database_migrate conf/server.local.json migrations/012_add_video_metadata_upload_fields.sql
 ./video_server conf/server.local.json
 curl http://127.0.0.1:9000/health
 curl -X POST http://127.0.0.1:9000/login -H 'Content-Type: application/json' -d '{"account":"bit-user-001","password":"123456"}'
 curl http://127.0.0.1:9000/videos
+curl -X POST http://127.0.0.1:9000/videos -H 'Content-Type: application/json' -d '{"title":"新发布视频","account":"bit-user-001","userName":"BIT 用户","category":"科技","tags":["后端"],"description":"元数据发布","videoFileName":"new-video.mp4"}'
 curl 'http://127.0.0.1:9000/videos/detail?id=video-001'
 curl 'http://127.0.0.1:9000/videos/search?keyword=%E7%BC%96%E7%A8%8B'
 curl 'http://127.0.0.1:9000/videos/play-url?videoId=video-001'

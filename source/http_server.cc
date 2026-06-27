@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
+#include <fstream>
 
 namespace biteserver {
 namespace {
@@ -120,6 +122,57 @@ std::string trimCopy(std::string value) {
     value.erase(std::find_if(value.rbegin(), value.rend(), notSpace).base(),
                 value.end());
     return value;
+}
+
+std::string pathFileName(const std::string& filename) {
+    return std::filesystem::path(filename).filename().string();
+}
+
+std::string lowerAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char ch) {
+                       return static_cast<char>(std::tolower(ch));
+                   });
+    return value;
+}
+
+std::string safeAccountName(std::string account) {
+    for (char& ch : account) {
+        const bool safe = std::isalnum(static_cast<unsigned char>(ch)) ||
+            ch == '-' || ch == '_';
+        if (!safe) {
+            ch = '_';
+        }
+    }
+    return account.empty() ? "unknown" : account;
+}
+
+bool hasAllowedAvatarSuffix(const std::string& filename) {
+    const std::string suffix =
+        lowerAscii(std::filesystem::path(filename).extension().string());
+    return suffix == ".png" || suffix == ".jpg" || suffix == ".jpeg";
+}
+
+bool writeBinaryFile(const std::filesystem::path& path,
+                     const std::string& content,
+                     std::string& error) {
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        error = "创建目录失败: " + ec.message();
+        return false;
+    }
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        error = "打开文件失败: " + path.string();
+        return false;
+    }
+    out.write(content.data(), static_cast<std::streamsize>(content.size()));
+    if (!out) {
+        error = "写入文件失败: " + path.string();
+        return false;
+    }
+    return true;
 }
 
 }  // namespace
@@ -1106,6 +1159,94 @@ void HttpServer::registerRoutes() {
             body["success"] = true;
             body["message"] = "保存成功";
             body["user"] = userProfileToJson(*profile);
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Post("/users/avatar", [this](const httplib::Request& request,
+                                         httplib::Response& response) {
+        Json::Value body;
+        constexpr std::size_t MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+        if (!request.is_multipart_form_data()) {
+            body["success"] = false;
+            body["message"] = "头像上传格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (!request.has_file("account") || !request.has_file("avatarFile")) {
+            body["success"] = false;
+            body["message"] = "头像上传格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const auto accountPart = request.get_file_value("account");
+        const auto avatarPart = request.get_file_value("avatarFile");
+        const std::string account = trimCopy(accountPart.content);
+        const std::string avatarName = pathFileName(avatarPart.filename);
+        if (account.empty()) {
+            body["success"] = false;
+            body["message"] = "用户不存在";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (avatarPart.content.empty() ||
+            avatarPart.content.size() > MAX_AVATAR_BYTES ||
+            !hasAllowedAvatarSuffix(avatarName)) {
+            body["success"] = false;
+            body["message"] = "请选择 PNG 或 JPG 头像";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        std::optional<bitevideo::UserProfile> profile;
+        std::string error;
+        if (!videoStore_.userProfile(account, profile, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /users/avatar profile lookup failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "头像保存失败";
+            setJsonResponse(response, 500, body);
+            return;
+        }
+        if (!profile) {
+            body["success"] = false;
+            body["message"] = "用户不存在";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::filesystem::path avatarPath =
+            std::filesystem::path("uploads") / "avatars" /
+            (safeAccountName(account) + "-" + avatarName);
+        if (!writeBinaryFile(avatarPath, avatarPart.content, error)) {
+            if (bitelog::g_logger) {
+                ERR("avatar file write failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "头像保存失败";
+            setJsonResponse(response, 500, body);
+            return;
+        }
+
+        bool updated = false;
+        if (!videoStore_.updateAvatarPath(
+                account, avatarPath.generic_string(), updated, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /users/avatar failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "头像保存失败";
+            setJsonResponse(response, 500, body);
+        } else if (!updated) {
+            body["success"] = false;
+            body["message"] = "用户不存在";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["message"] = "头像上传成功";
+            body["avatarPath"] = avatarPath.generic_string();
             setJsonResponse(response, 200, body);
         }
     });

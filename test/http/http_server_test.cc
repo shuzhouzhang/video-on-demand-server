@@ -266,6 +266,20 @@ public:
         return true;
     }
 
+    bool updateAvatarPath(const std::string& account,
+                          const std::string& avatarPath,
+                          bool& updated,
+                          std::string& error) override {
+        error.clear();
+        updated = false;
+        if (account != user_.account) {
+            return true;
+        }
+        user_.avatarPath = avatarPath;
+        updated = true;
+        return true;
+    }
+
     bool passwordLogin(const std::string& account,
                        const std::string& password,
                        std::optional<bitevideo::UserProfile>& profile,
@@ -961,6 +975,37 @@ int main() {
         const auto body = biteutil::JSON::unserialize(invalidProfileName->body);
         ok &= expect(body && !(*body)["success"].asBool(),
                      "POST /users/profile rejects an empty user name");
+    }
+
+    httplib::MultipartFormDataItems avatarItems = {
+        {"account", "bit-user-001", "", "text/plain"},
+        {"avatarFile", "fake-png-content", "avatar.png", "image/png"}};
+    const auto avatarUpload = client.Post("/users/avatar", avatarItems);
+    if (avatarUpload) {
+        const auto body = biteutil::JSON::unserialize(avatarUpload->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         !(*body)["avatarPath"].asString().empty(),
+                     "POST /users/avatar uploads an avatar");
+    }
+
+    httplib::MultipartFormDataItems badAvatarItems = {
+        {"account", "bit-user-001", "", "text/plain"},
+        {"avatarFile", "not an image", "avatar.gif", "image/gif"}};
+    const auto badAvatar = client.Post("/users/avatar", badAvatarItems);
+    if (badAvatar) {
+        const auto body = biteutil::JSON::unserialize(badAvatar->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /users/avatar rejects unsupported suffixes");
+    }
+
+    httplib::MultipartFormDataItems unknownAvatarItems = {
+        {"account", "missing-user", "", "text/plain"},
+        {"avatarFile", "fake-png-content", "avatar.png", "image/png"}};
+    const auto unknownAvatar = client.Post("/users/avatar", unknownAvatarItems);
+    if (unknownAvatar) {
+        const auto body = biteutil::JSON::unserialize(unknownAvatar->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /users/avatar reports an unknown user");
     }
 
     const auto adminReviews = client.Get("/admin/reviews");

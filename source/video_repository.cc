@@ -857,6 +857,36 @@ bool MySqlVideoRepository::updateUserProfile(
     return userProfile(account, profile, error);
 }
 
+bool MySqlVideoRepository::updateAvatarPath(const std::string& account,
+                                            const std::string& avatarPath,
+                                            bool& updated,
+                                            std::string& error) {
+    updated = false;
+    std::optional<UserProfile> profile;
+    if (!userProfile(account, profile, error)) {
+        return false;
+    }
+    if (!profile) {
+        return true;
+    }
+
+    std::string escapedAccount;
+    std::string escapedAvatarPath;
+    if (!database_.escape(account, escapedAccount, error) ||
+        !database_.escape(avatarPath, escapedAvatarPath, error)) {
+        return false;
+    }
+
+    const std::string sql =
+        "UPDATE users SET avatar_path = '" + escapedAvatarPath +
+        "' WHERE account = '" + escapedAccount + "'";
+    if (!database_.execute(sql, error)) {
+        return false;
+    }
+    updated = true;
+    return true;
+}
+
 bool MySqlVideoRepository::passwordLogin(
     const std::string& account,
     const std::string& password,

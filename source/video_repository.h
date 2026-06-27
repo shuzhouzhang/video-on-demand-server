@@ -152,6 +152,10 @@ public:
                                    const std::string& description,
                                    std::optional<UserProfile>& profile,
                                    std::string& error) = 0;
+    virtual bool updateAvatarPath(const std::string& account,
+                                  const std::string& avatarPath,
+                                  bool& updated,
+                                  std::string& error) = 0;
     virtual bool passwordLogin(const std::string& account,
                                const std::string& password,
                                std::optional<UserProfile>& profile,
@@ -255,6 +259,10 @@ public:
                            const std::string& description,
                            std::optional<UserProfile>& profile,
                            std::string& error) override;
+    bool updateAvatarPath(const std::string& account,
+                          const std::string& avatarPath,
+                          bool& updated,
+                          std::string& error) override;
     bool passwordLogin(const std::string& account,
                        const std::string& password,
                        std::optional<UserProfile>& profile,

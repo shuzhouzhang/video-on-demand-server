@@ -58,6 +58,7 @@ curl 'http://127.0.0.1:9000/videos/watch-progress?videoId=video-001&account=bit-
 curl 'http://127.0.0.1:9000/videos/favorite-status?videoId=video-001&account=bit-user-001'
 curl 'http://127.0.0.1:9000/users/favorites?account=bit-user-001'
 curl 'http://127.0.0.1:9000/users/profile?account=bit-user-001'
+curl -X POST http://127.0.0.1:9000/users/avatar -F account=bit-user-001 -F avatarFile=@avatar.png
 curl 'http://127.0.0.1:9000/users/videos?account=bit-user-001'
 curl 'http://127.0.0.1:9000/videos/comments?videoId=video-001'
 curl 'http://127.0.0.1:9000/videos/barrages?videoId=video-001'

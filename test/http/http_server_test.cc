@@ -599,16 +599,19 @@ int main() {
     const auto uploadedVideo = client.Post("/videos/upload", uploadItems);
     std::string uploadedId;
     std::string uploadedPath;
+    std::string uploadedPlayPath;
     if (uploadedVideo) {
         const auto body = biteutil::JSON::unserialize(uploadedVideo->body);
         uploadedId = body ? (*body)["video"]["id"].asString() : "";
         uploadedPath = body ? (*body)["video"]["storedVideoPath"].asString() :
             "";
+        uploadedPlayPath = body ? (*body)["video"]["playUrl"].asString() : "";
         ok &= expect(body && (*body)["success"].asBool() &&
                          !uploadedId.empty() &&
                          (*body)["video"]["videoFileName"].asString() ==
                              "client-name.mp4" &&
                          !uploadedPath.empty() &&
+                         uploadedPlayPath == "/" + uploadedPath &&
                          !(*body)["video"]["storedCoverPath"].asString().empty(),
                      "POST /videos/upload saves file and metadata");
     }
@@ -620,9 +623,16 @@ int main() {
             const auto body = biteutil::JSON::unserialize(
                 uploadedPlayUrl->body);
             ok &= expect(body && (*body)["success"].asBool() &&
-                             (*body)["playUrl"].asString() == uploadedPath,
+                             (*body)["playUrl"].asString() == "/" + uploadedPath,
                          "GET /videos/play-url returns uploaded storage path");
         }
+    }
+
+    if (!uploadedPlayPath.empty()) {
+        const auto uploadedFile = client.Get(uploadedPlayPath.c_str());
+        ok &= expect(uploadedFile && uploadedFile->status == 200 &&
+                         uploadedFile->body == "fake-mp4-content",
+                     "GET /uploads/... serves uploaded video bytes");
     }
 
     httplib::MultipartFormDataItems missingUploadFile = {

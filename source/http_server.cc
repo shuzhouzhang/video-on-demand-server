@@ -161,6 +161,15 @@ bool hasAllowedVideoSuffix(const std::string& filename) {
         suffix == ".avi" || suffix == ".webm";
 }
 
+std::string publicUploadUrl(const std::string& storedPath) {
+    std::string normalized = storedPath;
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+    if (normalized.rfind("uploads/", 0) == 0) {
+        return "/" + normalized;
+    }
+    return normalized;
+}
+
 bool writeBinaryFile(const std::filesystem::path& path,
                      const std::string& content,
                      std::string& error) {
@@ -212,6 +221,9 @@ bool draftFromJson(const Json::Value& payload,
 
 HttpServer::HttpServer(bitevideo::VideoStore& videoStore)
     : videoStore_(videoStore) {
+    std::error_code ignored;
+    std::filesystem::create_directories("uploads", ignored);
+    server_.set_mount_point("/uploads", "uploads");
     registerRoutes();
 }
 
@@ -472,6 +484,7 @@ void HttpServer::registerRoutes() {
             videoJson["coverFileName"] = draft.coverFileName;
             videoJson["storedVideoPath"] = videoPath.generic_string();
             videoJson["storedCoverPath"] = storedCoverPath;
+            videoJson["playUrl"] = publicUploadUrl(videoPath.generic_string());
             body["success"] = true;
             body["message"] = "文件上传成功";
             body["video"] = videoJson;
@@ -720,7 +733,7 @@ void HttpServer::registerRoutes() {
         } else {
             body["success"] = true;
             body["videoId"] = videoId;
-            body["playUrl"] = *playUrl;
+            body["playUrl"] = publicUploadUrl(*playUrl);
             setJsonResponse(response, 200, body);
         }
     });

@@ -74,6 +74,7 @@ struct VideoDraft {
     std::string category;
     std::vector<std::string> tags;
     std::string description;
+    std::string playUrl;
     std::string videoFileName;
     std::string coverFileName;
 };

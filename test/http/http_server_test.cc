@@ -1,9 +1,11 @@
 #include "../../source/http_server.h"
 #include "../../source/util.h"
 
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 namespace {
 
@@ -29,9 +31,15 @@ public:
                      std::optional<bitevideo::Video>& video,
                      std::string& error) override {
         error.clear();
+        const std::string videoId = nextCreatedVideoIndex_ < 10 ?
+            "video-00" + std::to_string(nextCreatedVideoIndex_++) :
+            "video-0" + std::to_string(nextCreatedVideoIndex_++);
         createdVideo_ = bitevideo::Video{
-            "video-003", draft.title, draft.userName, "6-25", 0,
+            videoId, draft.title, draft.userName, "6-25", 0,
             "0", "0", draft.category, draft.tags, draft.description};
+        createdVideos_[videoId] = createdVideo_;
+        createdPlayUrls_[videoId] = draft.playUrl.empty() ? draft.videoFileName :
+            draft.playUrl;
         video = createdVideo_;
         return true;
     }
@@ -42,8 +50,8 @@ public:
         error.clear();
         if (videoId == "video-001") {
             video = baseVideo_;
-        } else if (videoId == "video-003") {
-            video = createdVideo_;
+        } else if (createdVideos_.count(videoId) > 0) {
+            video = createdVideos_.at(videoId);
         } else {
             video.reset();
         }
@@ -67,6 +75,8 @@ public:
         error.clear();
         if (videoId == "video-001") {
             url = "D:/video-on-demand-client/test.mp4";
+        } else if (createdPlayUrls_.count(videoId) > 0) {
+            url = createdPlayUrls_.at(videoId);
         } else {
             url.reset();
         }
@@ -395,6 +405,9 @@ private:
         "36000", "256", "科技", {"编程开发", "软件工具"},
         "HTTP测试数据"};
     bitevideo::Video createdVideo_;
+    int nextCreatedVideoIndex_ = 3;
+    std::unordered_map<std::string, bitevideo::Video> createdVideos_;
+    std::unordered_map<std::string, std::string> createdPlayUrls_;
     bool liked_ = false;
     int likeCount_ = 256;
     int watchSeconds_ = 0;
@@ -418,6 +431,7 @@ private:
 
 int main() {
     bool ok = true;
+    std::filesystem::remove_all("uploads");
     FakeVideoStore videoStore;
     biteserver::HttpServer server(videoStore);
     const int port = server.bindToAnyPort("127.0.0.1");
@@ -574,6 +588,64 @@ int main() {
             missingVideoFileName->body);
         ok &= expect(body && !(*body)["success"].asBool(),
                      "POST /videos rejects a missing video file name");
+    }
+
+    httplib::MultipartFormDataItems uploadItems = {
+        {"metadata",
+         R"({"title":"上传视频","account":"bit-user-001","userName":"BIT 用户","category":"科技","tags":["上传","后端"],"description":"multipart 上传","videoFileName":"client-name.mp4","coverFileName":"client-cover.jpg"})",
+         "", "application/json"},
+        {"videoFile", "fake-mp4-content", "sample.mp4", "video/mp4"},
+        {"coverFile", "fake-jpg-content", "cover.jpg", "image/jpeg"}};
+    const auto uploadedVideo = client.Post("/videos/upload", uploadItems);
+    std::string uploadedId;
+    std::string uploadedPath;
+    if (uploadedVideo) {
+        const auto body = biteutil::JSON::unserialize(uploadedVideo->body);
+        uploadedId = body ? (*body)["video"]["id"].asString() : "";
+        uploadedPath = body ? (*body)["video"]["storedVideoPath"].asString() :
+            "";
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         !uploadedId.empty() &&
+                         (*body)["video"]["videoFileName"].asString() ==
+                             "client-name.mp4" &&
+                         !uploadedPath.empty() &&
+                         !(*body)["video"]["storedCoverPath"].asString().empty(),
+                     "POST /videos/upload saves file and metadata");
+    }
+
+    if (!uploadedId.empty() && !uploadedPath.empty()) {
+        const auto uploadedPlayUrl = client.Get(
+            ("/videos/play-url?videoId=" + uploadedId).c_str());
+        if (uploadedPlayUrl) {
+            const auto body = biteutil::JSON::unserialize(
+                uploadedPlayUrl->body);
+            ok &= expect(body && (*body)["success"].asBool() &&
+                             (*body)["playUrl"].asString() == uploadedPath,
+                         "GET /videos/play-url returns uploaded storage path");
+        }
+    }
+
+    httplib::MultipartFormDataItems missingUploadFile = {
+        {"metadata",
+         R"({"title":"上传视频","account":"bit-user-001","category":"科技"})",
+         "", "application/json"}};
+    const auto missingUpload = client.Post("/videos/upload", missingUploadFile);
+    if (missingUpload) {
+        const auto body = biteutil::JSON::unserialize(missingUpload->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos/upload rejects missing video file");
+    }
+
+    httplib::MultipartFormDataItems badUploadSuffix = {
+        {"metadata",
+         R"({"title":"上传视频","account":"bit-user-001","category":"科技"})",
+         "", "application/json"},
+        {"videoFile", "not-a-video", "sample.txt", "text/plain"}};
+    const auto badUpload = client.Post("/videos/upload", badUploadSuffix);
+    if (badUpload) {
+        const auto body = biteutil::JSON::unserialize(badUpload->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /videos/upload rejects unsupported suffixes");
     }
 
     const auto detail = client.Get("/videos/detail?id=video-001");
@@ -1070,5 +1142,6 @@ int main() {
 
     server.stop();
     serverThread.join();
+    std::filesystem::remove_all("uploads");
     return ok ? 0 : 1;
 }

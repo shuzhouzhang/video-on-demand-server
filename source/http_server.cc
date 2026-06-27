@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 
@@ -153,6 +154,13 @@ bool hasAllowedAvatarSuffix(const std::string& filename) {
     return suffix == ".png" || suffix == ".jpg" || suffix == ".jpeg";
 }
 
+bool hasAllowedVideoSuffix(const std::string& filename) {
+    const std::string suffix =
+        lowerAscii(std::filesystem::path(filename).extension().string());
+    return suffix == ".mp4" || suffix == ".mov" || suffix == ".mkv" ||
+        suffix == ".avi" || suffix == ".webm";
+}
+
 bool writeBinaryFile(const std::filesystem::path& path,
                      const std::string& content,
                      std::string& error) {
@@ -171,6 +179,31 @@ bool writeBinaryFile(const std::filesystem::path& path,
     if (!out) {
         error = "写入文件失败: " + path.string();
         return false;
+    }
+    return true;
+}
+
+bool draftFromJson(const Json::Value& payload,
+                   bitevideo::VideoDraft& draft) {
+    if (!payload.isObject()) {
+        return false;
+    }
+    draft.title = trimCopy(payload["title"].asString());
+    draft.account = trimCopy(payload["account"].asString());
+    draft.category = trimCopy(payload["category"].asString());
+    draft.userName = trimCopy(payload["userName"].asString());
+    draft.description = trimCopy(payload["description"].asString());
+    draft.videoFileName = trimCopy(payload["videoFileName"].asString());
+    draft.coverFileName = trimCopy(payload["coverFileName"].asString());
+    if (draft.userName.empty()) {
+        draft.userName = draft.account;
+    }
+    if (payload["tags"].isArray()) {
+        for (const Json::Value& tag : payload["tags"]) {
+            if (tag.isString() && !tag.asString().empty()) {
+                draft.tags.push_back(tag.asString());
+            }
+        }
     }
     return true;
 }
@@ -243,24 +276,7 @@ void HttpServer::registerRoutes() {
         }
 
         bitevideo::VideoDraft draft;
-        draft.title = trimCopy((*payload)["title"].asString());
-        draft.account = trimCopy((*payload)["account"].asString());
-        draft.category = trimCopy((*payload)["category"].asString());
-        draft.userName = trimCopy((*payload)["userName"].asString());
-        draft.description = trimCopy((*payload)["description"].asString());
-        draft.videoFileName = trimCopy((*payload)["videoFileName"].asString());
-        draft.coverFileName = trimCopy((*payload)["coverFileName"].asString());
-        if (draft.userName.empty()) {
-            draft.userName = draft.account;
-        }
-        const Json::Value& tags = (*payload)["tags"];
-        if (tags.isArray()) {
-            for (const Json::Value& tag : tags) {
-                if (tag.isString() && !tag.asString().empty()) {
-                    draft.tags.push_back(tag.asString());
-                }
-            }
-        }
+        draftFromJson(*payload, draft);
 
         if (draft.title.empty()) {
             body["success"] = false;
@@ -307,6 +323,157 @@ void HttpServer::registerRoutes() {
             videoJson["coverFileName"] = draft.coverFileName;
             body["success"] = true;
             body["message"] = "发布成功";
+            body["video"] = videoJson;
+            setJsonResponse(response, 200, body);
+        }
+    });
+
+    server_.Post("/videos/upload", [this](const httplib::Request& request,
+                                          httplib::Response& response) {
+        Json::Value body;
+        constexpr std::size_t MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+        constexpr std::size_t MAX_COVER_BYTES = 10 * 1024 * 1024;
+        if (!request.is_multipart_form_data()) {
+            body["success"] = false;
+            body["message"] = "上传格式必须是 multipart/form-data";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (!request.has_file("metadata") || !request.has_file("videoFile")) {
+            body["success"] = false;
+            body["message"] = "视频文件不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const auto metadataPart = request.get_file_value("metadata");
+        const auto metadata = biteutil::JSON::unserialize(metadataPart.content);
+        if (!metadata || !metadata->isObject()) {
+            body["success"] = false;
+            body["message"] = "视频元数据格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        bitevideo::VideoDraft draft;
+        if (!draftFromJson(*metadata, draft)) {
+            body["success"] = false;
+            body["message"] = "视频元数据格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        const auto videoPart = request.get_file_value("videoFile");
+        const std::string originalVideoName = pathFileName(videoPart.filename);
+        if (!draft.videoFileName.empty()) {
+            draft.videoFileName = pathFileName(draft.videoFileName);
+        }
+        if (draft.videoFileName.empty()) {
+            draft.videoFileName = originalVideoName;
+        }
+        if (draft.title.empty() || draft.account.empty() ||
+            draft.category.empty()) {
+            body["success"] = false;
+            body["message"] = "标题、账号和分类不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+        if (originalVideoName.empty() || videoPart.content.empty() ||
+            videoPart.content.size() > MAX_VIDEO_BYTES ||
+            !hasAllowedVideoSuffix(originalVideoName)) {
+            body["success"] = false;
+            body["message"] = "视频文件不能为空";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::string uploadPrefix =
+            safeAccountName(draft.account) + "-" +
+            std::to_string(std::time(nullptr)) + "-";
+        const std::filesystem::path videoPath =
+            std::filesystem::path("uploads") / "videos" /
+            (uploadPrefix + originalVideoName);
+        auto removeUploadedVideo = [&videoPath]() {
+            std::error_code ignored;
+            std::filesystem::remove(videoPath, ignored);
+        };
+        std::string error;
+        if (!writeBinaryFile(videoPath, videoPart.content, error)) {
+            if (bitelog::g_logger) {
+                ERR("video file write failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "视频文件保存失败";
+            setJsonResponse(response, 500, body);
+            return;
+        }
+
+        std::string storedCoverPath;
+        if (request.has_file("coverFile")) {
+            const auto coverPart = request.get_file_value("coverFile");
+            const std::string coverName = pathFileName(coverPart.filename);
+            if (!coverName.empty() && !coverPart.content.empty()) {
+                if (coverPart.content.size() > MAX_COVER_BYTES ||
+                    !hasAllowedAvatarSuffix(coverName)) {
+                    removeUploadedVideo();
+                    body["success"] = false;
+                    body["message"] = "封面文件格式错误";
+                    setJsonResponse(response, 200, body);
+                    return;
+                }
+                if (draft.coverFileName.empty()) {
+                    draft.coverFileName = coverName;
+                } else {
+                    draft.coverFileName = pathFileName(draft.coverFileName);
+                }
+                const std::filesystem::path coverPath =
+                    std::filesystem::path("uploads") / "covers" /
+                    (uploadPrefix + coverName);
+                if (!writeBinaryFile(coverPath, coverPart.content, error)) {
+                    removeUploadedVideo();
+                    if (bitelog::g_logger) {
+                        ERR("cover file write failed: {}", error);
+                    }
+                    body["success"] = false;
+                    body["message"] = "封面文件保存失败";
+                    setJsonResponse(response, 500, body);
+                    return;
+                }
+                storedCoverPath = coverPath.generic_string();
+            }
+        }
+
+        draft.playUrl = videoPath.generic_string();
+        std::optional<bitevideo::Video> video;
+        if (!videoStore_.createVideo(draft, video, error)) {
+            removeUploadedVideo();
+            if (!storedCoverPath.empty()) {
+                std::error_code ignored;
+                std::filesystem::remove(storedCoverPath, ignored);
+            }
+            if (bitelog::g_logger) {
+                ERR("POST /videos/upload failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "文件上传失败";
+            setJsonResponse(response, 500, body);
+        } else if (!video) {
+            removeUploadedVideo();
+            if (!storedCoverPath.empty()) {
+                std::error_code ignored;
+                std::filesystem::remove(storedCoverPath, ignored);
+            }
+            body["success"] = false;
+            body["message"] = "文件上传失败";
+            setJsonResponse(response, 500, body);
+        } else {
+            Json::Value videoJson = bitevideo::toJson(*video);
+            videoJson["ownerAccount"] = draft.account;
+            videoJson["videoFileName"] = draft.videoFileName;
+            videoJson["coverFileName"] = draft.coverFileName;
+            videoJson["storedVideoPath"] = videoPath.generic_string();
+            videoJson["storedCoverPath"] = storedCoverPath;
+            body["success"] = true;
+            body["message"] = "文件上传成功";
             body["video"] = videoJson;
             setJsonResponse(response, 200, body);
         }

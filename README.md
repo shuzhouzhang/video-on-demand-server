@@ -50,6 +50,7 @@ curl http://127.0.0.1:9000/health
 curl -X POST http://127.0.0.1:9000/login -H 'Content-Type: application/json' -d '{"account":"bit-user-001","password":"123456"}'
 curl http://127.0.0.1:9000/videos
 curl -X POST http://127.0.0.1:9000/videos -H 'Content-Type: application/json' -d '{"title":"新发布视频","account":"bit-user-001","userName":"BIT 用户","category":"科技","tags":["后端"],"description":"元数据发布","videoFileName":"new-video.mp4"}'
+curl -X POST http://127.0.0.1:9000/videos/upload -F 'metadata={"title":"上传视频","account":"bit-user-001","userName":"BIT 用户","category":"科技","tags":["上传"],"description":"multipart 文件上传","videoFileName":"sample.mp4"};type=application/json' -F videoFile=@sample.mp4
 curl 'http://127.0.0.1:9000/videos/detail?id=video-001'
 curl 'http://127.0.0.1:9000/videos/search?keyword=%E7%BC%96%E7%A8%8B'
 curl 'http://127.0.0.1:9000/videos/play-url?videoId=video-001'

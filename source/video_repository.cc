@@ -239,6 +239,7 @@ bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
     std::string escapedCategory;
     std::string escapedTags;
     std::string escapedDescription;
+    std::string escapedPlayUrl;
     std::string escapedVideoFileName;
     std::string escapedCoverFileName;
     if (!database_.escape(videoId, escapedVideoId, error) ||
@@ -248,6 +249,9 @@ bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
         !database_.escape(draft.category, escapedCategory, error) ||
         !database_.escape(*tagsJson, escapedTags, error) ||
         !database_.escape(draft.description, escapedDescription, error) ||
+        !database_.escape(
+            draft.playUrl.empty() ? draft.videoFileName : draft.playUrl,
+            escapedPlayUrl, error) ||
         !database_.escape(draft.videoFileName, escapedVideoFileName, error) ||
         !database_.escape(draft.coverFileName, escapedCoverFileName, error)) {
         return false;
@@ -261,7 +265,7 @@ bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
         escapedTitle + "', '" + escapedUserName + "', '" + escapedAccount +
         "', CURDATE(), 0, 0, 0, '" + escapedCategory + "', '" +
         escapedTags + "', '" + escapedDescription + "', '" +
-        escapedVideoFileName + "', '" + escapedVideoFileName + "', '" +
+        escapedPlayUrl + "', '" + escapedVideoFileName + "', '" +
         escapedCoverFileName + "', 1, '待审核')";
     if (!database_.execute(sql, error)) {
         return false;

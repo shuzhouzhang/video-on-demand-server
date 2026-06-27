@@ -18,3 +18,4 @@
 *.log
 *.dat
 /uploads/
+/test/http/uploads/

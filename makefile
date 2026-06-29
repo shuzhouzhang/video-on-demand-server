@@ -1,4 +1,4 @@
-.PHONY: server migrate test clean
+.PHONY: server migrate test audit-routes smoke clean
 
 server: source/server_main.cc source/http_server.cc source/config.cc \
 		source/database.cc source/video.cc source/video_repository.cc \
@@ -19,6 +19,15 @@ test:
 	$(MAKE) -C test/config test
 	$(MAKE) -C test/http test
 	$(MAKE) -C test/database test
+
+# Check whether the backend still covers the expected client route contract.
+audit-routes:
+	python3 tools/audit_routes.py
+
+# Run a live smoke test against a running server.
+# Usage: make smoke BASE_URL=http://192.168.19.129:9000
+smoke:
+	python3 tools/smoke_api.py --base-url $${BASE_URL:-http://127.0.0.1:9000}
 
 # Remove locally generated build artifacts.
 clean:

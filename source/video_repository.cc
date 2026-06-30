@@ -1174,4 +1174,46 @@ bool MySqlVideoRepository::updateAdminUser(const std::string& account,
     return true;
 }
 
+bool MySqlVideoRepository::smokeCleanup(
+    const std::string& videoId,
+    const std::string& videoTitle,
+    const std::string& account,
+    const std::string& previousAvatarPath,
+    std::string& error) {
+    std::string escapedVideoId;
+    std::string escapedVideoTitle;
+    std::string escapedAccount;
+    std::string escapedPreviousAvatarPath;
+    if (!database_.escape(videoId, escapedVideoId, error) ||
+        !database_.escape(videoTitle, escapedVideoTitle, error) ||
+        !database_.escape(account, escapedAccount, error) ||
+        !database_.escape(previousAvatarPath, escapedPreviousAvatarPath,
+                          error)) {
+        return false;
+    }
+
+    const std::vector<std::string> sqls = {
+        "DELETE FROM video_likes WHERE video_id = '" + escapedVideoId + "'",
+        "DELETE FROM video_watch_progress WHERE video_id = '" +
+            escapedVideoId + "'",
+        "DELETE FROM video_favorites WHERE video_id = '" + escapedVideoId +
+            "'",
+        "DELETE FROM video_comments WHERE video_id = '" + escapedVideoId +
+            "'",
+        "DELETE FROM video_barrages WHERE video_id = '" + escapedVideoId +
+            "'",
+        "DELETE FROM videos WHERE video_id = '" + escapedVideoId +
+            "' AND title = '" + escapedVideoTitle + "'",
+        "UPDATE users SET avatar_path = '" + escapedPreviousAvatarPath +
+            "' WHERE account = '" + escapedAccount + "'",
+    };
+
+    for (const std::string& sql : sqls) {
+        if (!database_.execute(sql, error)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace bitevideo

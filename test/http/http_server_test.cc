@@ -399,6 +399,15 @@ public:
         return true;
     }
 
+    bool smokeCleanup(const std::string&,
+                      const std::string&,
+                      const std::string&,
+                      const std::string&,
+                      std::string& error) override {
+        error.clear();
+        return true;
+    }
+
 private:
     bitevideo::Video baseVideo_{
         "video-001", "测试视频", "测试用户", "6-23", 558,

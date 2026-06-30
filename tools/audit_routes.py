@@ -49,6 +49,13 @@ EXPECTED_POST = {
     "/admin/users/action",
 }
 
+IGNORED_POST = {
+    # Development-only route enabled by VIDEO_ENABLE_SMOKE_CLEANUP for
+    # tools/smoke_api.py --write-checks cleanup. It is not part of the client
+    # contract and normal server startup does not expose it.
+    "/__smoke-cleanup",
+}
+
 
 def extract_routes(source: str, method: str) -> set[str]:
     pattern = rf'server_\.{method}\("([^"]+)"'
@@ -65,7 +72,7 @@ def main() -> int:
     missing_get = sorted(EXPECTED_GET - actual_get)
     missing_post = sorted(EXPECTED_POST - actual_post)
     extra_get = sorted(actual_get - EXPECTED_GET)
-    extra_post = sorted(actual_post - EXPECTED_POST)
+    extra_post = sorted(actual_post - EXPECTED_POST - IGNORED_POST)
 
     print("GET routes:", ", ".join(sorted(actual_get)))
     print("POST routes:", ", ".join(sorted(actual_post)))
@@ -73,6 +80,7 @@ def main() -> int:
     print("MISSING_POST:", missing_post)
     print("EXTRA_GET:", extra_get)
     print("EXTRA_POST:", extra_post)
+    print("IGNORED_POST:", sorted(actual_post & IGNORED_POST))
 
     if missing_get or missing_post:
         return 1

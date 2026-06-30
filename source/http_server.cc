@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -192,6 +193,47 @@ bool writeBinaryFile(const std::filesystem::path& path,
     return true;
 }
 
+bool smokeCleanupEnabled() {
+    const char* value = std::getenv("VIDEO_ENABLE_SMOKE_CLEANUP");
+    return value != nullptr && std::string(value) == "1";
+}
+
+bool safeRemoveUploadPath(const std::string& storedPath, std::string& error) {
+    if (storedPath.empty()) {
+        return true;
+    }
+
+    std::string normalized = storedPath;
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+    if (normalized.rfind("/uploads/", 0) == 0) {
+        normalized.erase(0, 1);
+    }
+    if (normalized.rfind("uploads/", 0) != 0) {
+        error = "只能清理uploads目录下的测试文件";
+        return false;
+    }
+
+    const std::filesystem::path relative(normalized);
+    if (relative.is_absolute()) {
+        error = "不能清理绝对路径";
+        return false;
+    }
+    for (const auto& part : relative) {
+        if (part == "..") {
+            error = "不能清理上级目录路径";
+            return false;
+        }
+    }
+
+    std::error_code ec;
+    std::filesystem::remove(relative, ec);
+    if (ec) {
+        error = "清理测试文件失败: " + ec.message();
+        return false;
+    }
+    return true;
+}
+
 bool draftFromJson(const Json::Value& payload,
                    bitevideo::VideoDraft& draft) {
     if (!payload.isObject()) {
@@ -246,6 +288,64 @@ void HttpServer::registerRoutes() {
         response.status = 200;
         response.set_content(*json, "application/json");
     });
+
+    if (smokeCleanupEnabled()) {
+        server_.Post("/__smoke-cleanup",
+                     [this](const httplib::Request& request,
+                            httplib::Response& response) {
+            Json::Value body;
+            const auto payload = biteutil::JSON::unserialize(request.body);
+            if (!payload || !payload->isObject()) {
+                body["success"] = false;
+                body["message"] = "请求JSON格式错误";
+                setJsonResponse(response, 200, body);
+                return;
+            }
+
+            const std::string videoId =
+                trimCopy((*payload)["videoId"].asString());
+            const std::string videoTitle =
+                trimCopy((*payload)["videoTitle"].asString());
+            const std::string account =
+                trimCopy((*payload)["account"].asString());
+            const std::string previousAvatarPath =
+                (*payload)["previousAvatarPath"].asString();
+            if (videoId.empty() || videoTitle.empty() || account.empty()) {
+                body["success"] = false;
+                body["message"] = "清理参数不完整";
+                setJsonResponse(response, 200, body);
+                return;
+            }
+
+            std::string error;
+            if (!videoStore_.smokeCleanup(videoId, videoTitle, account,
+                                          previousAvatarPath, error)) {
+                body["success"] = false;
+                body["message"] = "测试数据清理失败";
+                if (bitelog::g_logger) {
+                    ERR("POST /__smoke-cleanup database failed: {}", error);
+                }
+                setJsonResponse(response, 500, body);
+                return;
+            }
+
+            const char* uploadFields[] = {
+                "storedVideoPath", "storedCoverPath", "avatarPath"};
+            for (const char* field : uploadFields) {
+                if (!safeRemoveUploadPath((*payload)[field].asString(),
+                                          error)) {
+                    body["success"] = false;
+                    body["message"] = error;
+                    setJsonResponse(response, 500, body);
+                    return;
+                }
+            }
+
+            body["success"] = true;
+            body["message"] = "smoke cleanup complete";
+            setJsonResponse(response, 200, body);
+        });
+    }
 
     server_.Get("/videos", [this](const httplib::Request&,
                                   httplib::Response& response) {

@@ -184,6 +184,11 @@ public:
                                  const std::string& action,
                                  bool& updated,
                                  std::string& error) = 0;
+    virtual bool smokeCleanup(const std::string& videoId,
+                              const std::string& videoTitle,
+                              const std::string& account,
+                              const std::string& previousAvatarPath,
+                              std::string& error) = 0;
 };
 
 class MySqlVideoRepository : public VideoStore {
@@ -291,6 +296,11 @@ public:
                          const std::string& action,
                          bool& updated,
                          std::string& error) override;
+    bool smokeCleanup(const std::string& videoId,
+                      const std::string& videoTitle,
+                      const std::string& account,
+                      const std::string& previousAvatarPath,
+                      std::string& error) override;
 
 private:
     bitedb::Database& database_;

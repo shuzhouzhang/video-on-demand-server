@@ -66,6 +66,36 @@ make migrate
 
 ## 启动服务
 
+开发演示推荐用一键启动命令。它会先编译 `video_server`，再用
+`conf/server.local.json` 后台启动服务，并把日志写到
+`/tmp/video_server_dev.log`：
+
+```bash
+make dev-start
+make dev-status
+make dev-smoke
+```
+
+停止开发服务：
+
+```bash
+make dev-stop
+```
+
+如果客户端从 Windows 访问虚拟机，确认虚拟机 IP 后访问
+`http://192.168.19.129:9000`。在虚拟机内验证可继续用默认
+`http://127.0.0.1:9000`；从宿主机验证则指定：
+
+```bash
+python tools/smoke_api.py --base-url http://192.168.19.129:9000
+```
+
+`make dev-start` 会额外启用一个只供 smoke 清理数据的内部接口
+`POST /__smoke-cleanup`。普通 `./video_server conf/server.local.json`
+启动不会暴露这个接口。
+
+手动前台启动仍然可用：
+
 ```bash
 make server
 ./video_server conf/server.local.json
@@ -92,6 +122,17 @@ make smoke BASE_URL=http://192.168.19.129:9000
 ```
 
 这个脚本会验证健康检查、登录、视频列表、详情、播放地址、用户资料、评论、弹幕和后台审核接口是否可用。
+
+如果要验证真实写入链路，包括视频上传、头像上传和 `/uploads/...`
+静态资源访问，先用 `make dev-start` 启动服务，再运行：
+
+```bash
+make dev-smoke-write
+python tools/smoke_api.py --base-url http://192.168.19.129:9000 --write-checks
+```
+
+`--write-checks` 会创建一条测试视频和一个测试头像，确认静态资源能访问，
+最后清理自己创建的数据库记录和上传文件。
 
 ## 常用接口示例
 

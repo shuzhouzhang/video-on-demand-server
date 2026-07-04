@@ -12,9 +12,18 @@
 
 namespace biteserver {
 
+enum class ServiceRole {
+    All,
+    User,
+    Video,
+    Interaction,
+};
+
 class HttpServer {
 public:
     explicit HttpServer(bitevideo::VideoStore& videoStore);
+    HttpServer(bitevideo::VideoStore& videoStore, ServiceRole role,
+               std::string serviceName);
 
     // 正式运行入口；成功监听后会阻塞，直到服务被停止。
     bool listen(const std::string& host, std::uint16_t port);
@@ -26,9 +35,12 @@ public:
 
 private:
     void registerRoutes();
+    void registerHealthRoutes();
 
     httplib::Server server_;
     bitevideo::VideoStore& videoStore_;
+    ServiceRole role_;
+    std::string serviceName_;
 };
 
 }  // namespace biteserver

@@ -9,6 +9,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <utility>
 
 namespace biteserver {
 namespace {
@@ -262,14 +263,21 @@ bool draftFromJson(const Json::Value& payload,
 }  // namespace
 
 HttpServer::HttpServer(bitevideo::VideoStore& videoStore)
-    : videoStore_(videoStore) {
+    : HttpServer(videoStore, ServiceRole::All, "video_server") {
+}
+
+HttpServer::HttpServer(bitevideo::VideoStore& videoStore, ServiceRole role,
+                       std::string serviceName)
+    : videoStore_(videoStore),
+      role_(role),
+      serviceName_(std::move(serviceName)) {
     std::error_code ignored;
     std::filesystem::create_directories("uploads", ignored);
     server_.set_mount_point("/uploads", "uploads");
     registerRoutes();
 }
 
-void HttpServer::registerRoutes() {
+void HttpServer::registerHealthRoutes() {
     server_.Get("/health", [](const httplib::Request&, httplib::Response& response) {
         Json::Value body;
         body["code"] = 0;
@@ -288,6 +296,24 @@ void HttpServer::registerRoutes() {
         response.status = 200;
         response.set_content(*json, "application/json");
     });
+
+    server_.Get("/healthz", [this](const httplib::Request&,
+                                   httplib::Response& response) {
+        Json::Value body;
+        body["success"] = true;
+        body["service"] = serviceName_;
+        body["status"] = "ok";
+        setJsonResponse(response, 200, body);
+    });
+}
+
+void HttpServer::registerRoutes() {
+    registerHealthRoutes();
+
+    const bool all = role_ == ServiceRole::All;
+    const bool user = all || role_ == ServiceRole::User;
+    const bool video = all || role_ == ServiceRole::Video;
+    const bool interaction = all || role_ == ServiceRole::Interaction;
 
     if (smokeCleanupEnabled()) {
         server_.Post("/__smoke-cleanup",
@@ -347,6 +373,7 @@ void HttpServer::registerRoutes() {
         });
     }
 
+    if (video) {
     server_.Get("/videos", [this](const httplib::Request&,
                                   httplib::Response& response) {
         std::vector<bitevideo::Video> videos;
@@ -591,7 +618,9 @@ void HttpServer::registerRoutes() {
             setJsonResponse(response, 200, body);
         }
     });
+    }
 
+    if (user) {
     server_.Post("/login", [this](const httplib::Request& request,
                                   httplib::Response& response) {
         Json::Value body;
@@ -610,6 +639,39 @@ void HttpServer::registerRoutes() {
         if (!videoStore_.passwordLogin(account, password, profile, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /login failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "登录暂时不可用";
+            setJsonResponse(response, 500, body);
+        } else if (!profile) {
+            body["success"] = false;
+            body["message"] = "账号或密码错误";
+            setJsonResponse(response, 200, body);
+        } else {
+            body["success"] = true;
+            body["userName"] = profile->userName;
+            body["account"] = profile->account;
+            setJsonResponse(response, 200, body);
+        }
+    });
+    server_.Post("/login/password", [this](const httplib::Request& request,
+                                           httplib::Response& response) {
+        Json::Value body;
+        const auto payload = biteutil::JSON::unserialize(request.body);
+        if (!payload || !payload->isObject()) {
+            body["success"] = false;
+            body["message"] = "请求JSON格式错误";
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
+        const std::string account = trimCopy((*payload)["account"].asString());
+        const std::string password = (*payload)["password"].asString();
+        std::optional<bitevideo::UserProfile> profile;
+        std::string error;
+        if (!videoStore_.passwordLogin(account, password, profile, error)) {
+            if (bitelog::g_logger) {
+                ERR("POST /login/password failed: {}", error);
             }
             body["success"] = false;
             body["message"] = "登录暂时不可用";
@@ -736,7 +798,9 @@ void HttpServer::registerRoutes() {
             setJsonResponse(response, 200, body);
         }
     });
+    }
 
+    if (video) {
     server_.Get("/videos/detail", [this](const httplib::Request& request,
                                          httplib::Response& response) {
         Json::Value body;
@@ -837,7 +901,9 @@ void HttpServer::registerRoutes() {
             setJsonResponse(response, 200, body);
         }
     });
+    }
 
+    if (interaction) {
     server_.Get("/videos/like-status", [this](const httplib::Request& request,
                                               httplib::Response& response) {
         Json::Value body;
@@ -1139,7 +1205,9 @@ void HttpServer::registerRoutes() {
         }
         setJsonResponse(response, 200, body);
     });
+    }
 
+    if (video) {
     server_.Get("/users/videos", [this](const httplib::Request& request,
                                         httplib::Response& response) {
         Json::Value body;
@@ -1171,7 +1239,9 @@ void HttpServer::registerRoutes() {
         }
         setJsonResponse(response, 200, body);
     });
+    }
 
+    if (interaction) {
     server_.Get("/videos/comments", [this](const httplib::Request& request,
                                            httplib::Response& response) {
         Json::Value body;
@@ -1355,7 +1425,9 @@ void HttpServer::registerRoutes() {
             setJsonResponse(response, 200, body);
         }
     });
+    }
 
+    if (user) {
     server_.Get("/users/profile", [this](const httplib::Request& request,
                                          httplib::Response& response) {
         Json::Value body;
@@ -1530,7 +1602,9 @@ void HttpServer::registerRoutes() {
             setJsonResponse(response, 200, body);
         }
     });
+    }
 
+    if (video) {
     server_.Get("/admin/reviews", [this](const httplib::Request&,
                                          httplib::Response& response) {
         Json::Value body;
@@ -1587,7 +1661,9 @@ void HttpServer::registerRoutes() {
             setJsonResponse(response, 200, body);
         }
     });
+    }
 
+    if (user) {
     server_.Get("/admin/users", [this](const httplib::Request&,
                                       httplib::Response& response) {
         Json::Value body;
@@ -1644,6 +1720,7 @@ void HttpServer::registerRoutes() {
             setJsonResponse(response, 200, body);
         }
     });
+    }
 }
 
 bool HttpServer::listen(const std::string& host, std::uint16_t port) {

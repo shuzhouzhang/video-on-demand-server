@@ -10,6 +10,10 @@
 /test/http/http_server_test
 /test/database/database_test
 /video_server
+/api_gateway
+/user_service
+/video_service
+/interaction_service
 /database_migrate
 
 # Runtime-generated configuration and logs

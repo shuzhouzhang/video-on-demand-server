@@ -221,7 +221,16 @@ void forwardToDownstream(const GatewaySettings& settings,
     }
     httplib::Result result = request.method == "GET"
         ? client.Get(target.c_str(), headers)
-        : client.Post(target.c_str(), headers, request.body, contentType.c_str());
+        : (request.is_multipart_form_data()
+            ? [&]() {
+                httplib::MultipartFormDataItems items;
+                for (const auto& file : request.files) {
+                    items.push_back(file.second);
+                }
+                return client.Post(target.c_str(), headers, items);
+            }()
+            : client.Post(target.c_str(), headers, request.body,
+                          contentType.c_str()));
     if (!result) {
         Json::Value body;
         body["success"] = false;

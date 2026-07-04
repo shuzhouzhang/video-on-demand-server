@@ -211,18 +211,16 @@ void forwardToDownstream(const GatewaySettings& settings,
     headers.emplace("X-Request-Id", requestId);
 
     const std::string contentType = request.get_header_value("Content-Type");
-    httplib::Result result;
-    if (request.method == "GET") {
-        result = client.Get(target.c_str(), headers);
-    } else if (request.method == "POST") {
-        result = client.Post(target.c_str(), headers, request.body, contentType);
-    } else {
+    if (request.method != "GET" && request.method != "POST") {
         Json::Value body;
         body["success"] = false;
         body["message"] = "gateway method not allowed";
         setJsonResponse(response, 405, body);
         return;
     }
+    httplib::Result result = request.method == "GET"
+        ? client.Get(target.c_str(), headers)
+        : client.Post(target.c_str(), headers, request.body, contentType.c_str());
     if (!result) {
         Json::Value body;
         body["success"] = false;

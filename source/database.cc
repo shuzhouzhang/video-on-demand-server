@@ -1,5 +1,7 @@
 #include "database.h"
 
+#include <mysql/plugin_auth_common.h>
+
 #include <odb/connection.hxx>
 #include <odb/exception.hxx>
 #include <odb/mysql/connection.hxx>

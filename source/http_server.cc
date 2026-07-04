@@ -1724,11 +1724,11 @@ void HttpServer::registerRoutes() {
 }
 
 bool HttpServer::listen(const std::string& host, std::uint16_t port) {
-    return server_.listen(host, port);
+    return server_.listen(host.c_str(), port);
 }
 
 int HttpServer::bindToAnyPort(const std::string& host) {
-    return server_.bind_to_any_port(host);
+    return server_.bind_to_any_port(host.c_str());
 }
 
 bool HttpServer::listenAfterBind() {

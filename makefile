@@ -112,7 +112,7 @@ dev-stop-ms:
 	@pkill -x api_gateway 2>/dev/null || true
 	@pkill -x user_service 2>/dev/null || true
 	@pkill -x video_service 2>/dev/null || true
-	@pkill -f './interaction_service' 2>/dev/null || true
+	@pkill -f '^\./interaction_service ' 2>/dev/null || true
 	@echo "microservices stopped"
 
 # Show whether all local microservice demo processes and health endpoints work.
@@ -120,7 +120,7 @@ dev-status-ms:
 	@pgrep -a api_gateway || { echo "api_gateway is not running"; exit 1; }
 	@pgrep -a user_service || { echo "user_service is not running"; exit 1; }
 	@pgrep -a video_service || { echo "video_service is not running"; exit 1; }
-	@pgrep -af './interaction_service' || { echo "interaction_service is not running"; exit 1; }
+	@pgrep -af '^\./interaction_service ' || { echo "interaction_service is not running"; exit 1; }
 	@curl -fsS "http://127.0.0.1:9000/healthz" >/dev/null && echo "api_gateway healthz ok"
 	@curl -fsS "http://127.0.0.1:9101/healthz" >/dev/null && echo "user_service healthz ok"
 	@curl -fsS "http://127.0.0.1:9102/healthz" >/dev/null && echo "video_service healthz ok"

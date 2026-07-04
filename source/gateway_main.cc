@@ -206,6 +206,7 @@ void forwardToDownstream(const GatewaySettings& settings,
     httplib::Headers headers = request.headers;
     headers.erase("Host");
     headers.erase("Content-Length");
+    headers.erase("Content-Type");
     headers.erase("Transfer-Encoding");
     headers.erase("X-Request-Id");
     headers.emplace("X-Request-Id", requestId);

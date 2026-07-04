@@ -9,6 +9,10 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <optional>
+#include <random>
+#include <sstream>
 
 namespace biteserver {
 namespace {
@@ -162,6 +166,24 @@ bool hasAllowedVideoSuffix(const std::string& filename) {
         suffix == ".avi" || suffix == ".webm";
 }
 
+std::string randomHex(std::size_t digits) {
+    static thread_local std::mt19937 generator(std::random_device{}());
+    std::uniform_int_distribution<int> distribution(0, 15);
+    std::ostringstream out;
+    for (std::size_t i = 0; i < digits; ++i) {
+        out << std::hex << distribution(generator);
+    }
+    return out.str();
+}
+
+std::string storedUploadFileName(const std::string& account,
+                                 const std::string& originalName) {
+    const std::string suffix =
+        lowerAscii(std::filesystem::path(originalName).extension().string());
+    return safeAccountName(account) + "-" + std::to_string(std::time(nullptr)) +
+        "-" + randomHex(12) + suffix;
+}
+
 std::string publicUploadUrl(const std::string& storedPath) {
     std::string normalized = storedPath;
     std::replace(normalized.begin(), normalized.end(), '\\', '/');
@@ -169,6 +191,47 @@ std::string publicUploadUrl(const std::string& storedPath) {
         return "/" + normalized;
     }
     return normalized;
+}
+
+std::string contentTypeForUpload(const std::filesystem::path& path) {
+    const std::string suffix = lowerAscii(path.extension().string());
+    if (suffix == ".png") {
+        return "image/png";
+    }
+    if (suffix == ".jpg" || suffix == ".jpeg") {
+        return "image/jpeg";
+    }
+    if (suffix == ".mp4") {
+        return "video/mp4";
+    }
+    if (suffix == ".webm") {
+        return "video/webm";
+    }
+    if (suffix == ".mov") {
+        return "video/quicktime";
+    }
+    if (suffix == ".mkv") {
+        return "video/x-matroska";
+    }
+    if (suffix == ".avi") {
+        return "video/x-msvideo";
+    }
+    return "application/octet-stream";
+}
+
+bool readBinaryFile(const std::filesystem::path& path,
+                    std::string& content,
+                    std::string& error) {
+    content.clear();
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        error = "打开文件失败: " + path.string();
+        return false;
+    }
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    content = buffer.str();
+    return true;
 }
 
 bool writeBinaryFile(const std::filesystem::path& path,
@@ -196,6 +259,42 @@ bool writeBinaryFile(const std::filesystem::path& path,
 bool smokeCleanupEnabled() {
     const char* value = std::getenv("VIDEO_ENABLE_SMOKE_CLEANUP");
     return value != nullptr && std::string(value) == "1";
+}
+
+bool debugEmailCodeEnabled() {
+    const char* value = std::getenv("VIDEO_DEBUG_EMAIL_CODE");
+    return value != nullptr && std::string(value) == "1";
+}
+
+std::optional<std::string> configuredAdminToken() {
+    const char* value = std::getenv("VIDEO_ADMIN_TOKEN");
+    if (!value || std::string(value).empty()) {
+        return std::nullopt;
+    }
+    return std::string(value);
+}
+
+bool requireAdminToken(const httplib::Request& request,
+                       const Json::Value& payload,
+                       httplib::Response& response) {
+    const auto expectedToken = configuredAdminToken();
+    if (!expectedToken) {
+        return true;
+    }
+
+    std::string providedToken = request.get_header_value("X-Admin-Token");
+    if (providedToken.empty()) {
+        providedToken = payload["adminToken"].asString();
+    }
+    if (providedToken == *expectedToken) {
+        return true;
+    }
+
+    Json::Value body;
+    body["success"] = false;
+    body["message"] = "管理员令牌无效";
+    setJsonResponse(response, 401, body);
+    return false;
 }
 
 bool safeRemoveUploadPath(const std::string& storedPath, std::string& error) {
@@ -265,7 +364,6 @@ HttpServer::HttpServer(bitevideo::VideoStore& videoStore)
     : videoStore_(videoStore) {
     std::error_code ignored;
     std::filesystem::create_directories("uploads", ignored);
-    server_.set_mount_point("/uploads", "uploads");
     registerRoutes();
 }
 
@@ -287,6 +385,47 @@ void HttpServer::registerRoutes() {
 
         response.status = 200;
         response.set_content(*json, "application/json");
+    });
+
+    server_.Get(R"(/uploads/(.*))",
+                [](const httplib::Request& request,
+                   httplib::Response& response) {
+        const std::filesystem::path uploadRoot =
+            std::filesystem::weakly_canonical("uploads");
+        std::string relativePath = request.path.substr(std::string("/uploads/").size());
+        std::replace(relativePath.begin(), relativePath.end(), '\\', '/');
+        const std::filesystem::path relative(relativePath);
+        if (relative.empty() || relative.is_absolute()) {
+            response.status = 400;
+            return;
+        }
+        for (const auto& part : relative) {
+            if (part == "..") {
+                response.status = 400;
+                return;
+            }
+        }
+
+        std::error_code ec;
+        const std::filesystem::path target =
+            std::filesystem::weakly_canonical(uploadRoot / relative, ec);
+        if (ec || target.string().rfind(uploadRoot.string(), 0) != 0 ||
+            !std::filesystem::is_regular_file(target, ec)) {
+            response.status = 404;
+            return;
+        }
+
+        std::string content;
+        std::string error;
+        if (!readBinaryFile(target, content, error)) {
+            if (bitelog::g_logger) {
+                ERR("GET /uploads failed: {}", error);
+            }
+            response.status = 500;
+            return;
+        }
+        response.status = 200;
+        response.set_content(content, contentTypeForUpload(target).c_str());
     });
 
     if (smokeCleanupEnabled()) {
@@ -498,12 +637,9 @@ void HttpServer::registerRoutes() {
             return;
         }
 
-        const std::string uploadPrefix =
-            safeAccountName(draft.account) + "-" +
-            std::to_string(std::time(nullptr)) + "-";
         const std::filesystem::path videoPath =
             std::filesystem::path("uploads") / "videos" /
-            (uploadPrefix + originalVideoName);
+            storedUploadFileName(draft.account, originalVideoName);
         auto removeUploadedVideo = [&videoPath]() {
             std::error_code ignored;
             std::filesystem::remove(videoPath, ignored);
@@ -539,7 +675,7 @@ void HttpServer::registerRoutes() {
                 }
                 const std::filesystem::path coverPath =
                     std::filesystem::path("uploads") / "covers" /
-                    (uploadPrefix + coverName);
+                    storedUploadFileName(draft.account, coverName);
                 if (!writeBinaryFile(coverPath, coverPart.content, error)) {
                     removeUploadedVideo();
                     if (bitelog::g_logger) {
@@ -656,7 +792,9 @@ void HttpServer::registerRoutes() {
             body["success"] = true;
             body["message"] = "验证码已发送";
             body["authcodeId"] = session.authcodeId;
-            body["debugCode"] = session.debugCode;
+            if (debugEmailCodeEnabled()) {
+                body["debugCode"] = session.debugCode;
+            }
             setJsonResponse(response, 200, body);
         }
     });
@@ -1499,7 +1637,11 @@ void HttpServer::registerRoutes() {
 
         const std::filesystem::path avatarPath =
             std::filesystem::path("uploads") / "avatars" /
-            (safeAccountName(account) + "-" + avatarName);
+            storedUploadFileName(account, avatarName);
+        auto removeUploadedAvatar = [&avatarPath]() {
+            std::error_code ignored;
+            std::filesystem::remove(avatarPath, ignored);
+        };
         if (!writeBinaryFile(avatarPath, avatarPart.content, error)) {
             if (bitelog::g_logger) {
                 ERR("avatar file write failed: {}", error);
@@ -1513,6 +1655,7 @@ void HttpServer::registerRoutes() {
         bool updated = false;
         if (!videoStore_.updateAvatarPath(
                 account, avatarPath.generic_string(), updated, error)) {
+            removeUploadedAvatar();
             if (bitelog::g_logger) {
                 ERR("POST /users/avatar failed: {}", error);
             }
@@ -1520,6 +1663,7 @@ void HttpServer::registerRoutes() {
             body["message"] = "头像保存失败";
             setJsonResponse(response, 500, body);
         } else if (!updated) {
+            removeUploadedAvatar();
             body["success"] = false;
             body["message"] = "用户不存在";
             setJsonResponse(response, 200, body);
@@ -1563,6 +1707,9 @@ void HttpServer::registerRoutes() {
             body["success"] = false;
             body["message"] = "请求JSON格式错误";
             setJsonResponse(response, 200, body);
+            return;
+        }
+        if (!requireAdminToken(request, *payload, response)) {
             return;
         }
 
@@ -1620,6 +1767,9 @@ void HttpServer::registerRoutes() {
             body["success"] = false;
             body["message"] = "请求JSON格式错误";
             setJsonResponse(response, 200, body);
+            return;
+        }
+        if (!requireAdminToken(request, *payload, response)) {
             return;
         }
 

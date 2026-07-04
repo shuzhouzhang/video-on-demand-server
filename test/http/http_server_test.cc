@@ -1,6 +1,7 @@
 #include "../../source/http_server.h"
 #include "../../source/util.h"
 
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -497,7 +498,7 @@ int main() {
         const auto body = biteutil::JSON::unserialize(emailCode->body);
         ok &= expect(body && (*body)["success"].asBool() &&
                          (*body)["authcodeId"].asString() == "email-code-001" &&
-                         (*body)["debugCode"].asString() == "246810",
+                         !body->isMember("debugCode"),
                      "POST /login/email-code creates a code session");
     }
 
@@ -1146,11 +1147,36 @@ int main() {
     if (userAction) {
         const auto body = biteutil::JSON::unserialize(userAction->body);
         ok &= expect(body && (*body)["success"].asBool(),
-                     "POST /admin/users/action updates a user");
+                     "POST /admin/users/action updates a user in demo mode");
+    }
+
+    setenv("VIDEO_ADMIN_TOKEN", "test-admin-token", 1);
+    const auto missingTokenAction = client.Post(
+        "/admin/users/action",
+        R"({"account":"bit-user-001","action":"enable"})",
+        "application/json");
+    if (missingTokenAction) {
+        const auto body = biteutil::JSON::unserialize(missingTokenAction->body);
+        ok &= expect(missingTokenAction->status == 401 && body &&
+                         !(*body)["success"].asBool(),
+                     "POST /admin/users/action rejects a missing admin token");
+    }
+
+    httplib::Headers adminHeaders{{"X-Admin-Token", "test-admin-token"}};
+    const auto tokenUserAction = client.Post(
+        "/admin/users/action",
+        adminHeaders,
+        R"({"account":"bit-user-001","action":"enable"})",
+        "application/json");
+    if (tokenUserAction) {
+        const auto body = biteutil::JSON::unserialize(tokenUserAction->body);
+        ok &= expect(body && (*body)["success"].asBool(),
+                     "POST /admin/users/action accepts a valid admin token");
     }
 
     const auto invalidUserAction = client.Post(
         "/admin/users/action",
+        adminHeaders,
         R"({"account":"bit-user-001","action":"unknown"})",
         "application/json");
     if (invalidUserAction) {
@@ -1158,6 +1184,7 @@ int main() {
         ok &= expect(body && !(*body)["success"].asBool(),
                      "POST /admin/users/action rejects unsupported actions");
     }
+    unsetenv("VIDEO_ADMIN_TOKEN");
 
     server.stop();
     serverThread.join();

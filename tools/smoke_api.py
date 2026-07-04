@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import sys
 import urllib.parse
 import urllib.request
@@ -18,13 +19,21 @@ import uuid
 from typing import Any
 
 
-def request_json(base_url: str, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any] | list[Any]:
+def request_json(
+    base_url: str,
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+    extra_headers: dict[str, str] | None = None,
+) -> dict[str, Any] | list[Any]:
     url = urllib.parse.urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
     data = None
     headers = {"Accept": "application/json"}
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json; charset=utf-8"
+    if extra_headers:
+        headers.update(extra_headers)
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(request, timeout=5) as response:
         body = response.read().decode("utf-8")
@@ -87,6 +96,11 @@ def expect(condition: bool, message: str) -> None:
     print(f"[PASS] {message}")
 
 
+def admin_headers() -> dict[str, str]:
+    token = os.environ.get("VIDEO_ADMIN_TOKEN", "")
+    return {"X-Admin-Token": token} if token else {}
+
+
 def run_write_checks(base_url: str) -> None:
     marker = f"Codex smoke write check {uuid.uuid4().hex[:8]}"
     video_bytes = b"fake mp4 payload from smoke write checks"
@@ -130,6 +144,18 @@ def run_write_checks(base_url: str) -> None:
         play_url = video.get("playUrl", "")
         expect(bool(uploaded_video_id and play_url), "upload response returns video id and playUrl")
         expect(request_bytes(base_url, play_url) == video_bytes, "GET uploaded video bytes through /uploads")
+
+        review = request_json(
+            base_url,
+            "POST",
+            "/admin/reviews/action",
+            {"videoId": uploaded_video_id, "status": "审核通过"},
+            extra_headers=admin_headers(),
+        )
+        expect(
+            isinstance(review, dict) and review.get("success") is True,
+            "POST /admin/reviews/action approves uploaded smoke video",
+        )
 
         loaded_play_url = request_json(base_url, "GET", f"/videos/play-url?videoId={urllib.parse.quote(uploaded_video_id)}")
         expect(

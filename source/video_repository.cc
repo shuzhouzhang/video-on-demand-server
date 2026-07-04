@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <iomanip>
+#include <random>
 #include <regex>
 #include <sstream>
 
@@ -17,6 +18,8 @@ const std::string VIDEO_SELECT =
     "DATE_FORMAT(published_on, '%c-%e'), duration_seconds, "
     "CAST(play_count AS CHAR), CAST(like_count AS CHAR), category, "
     "CAST(tags AS CHAR), description FROM videos ";
+const std::string PUBLIC_VIDEO_CONDITION =
+    "status = 1 AND review_status = '审核通过'";
 
 std::string valueOrEmpty(const std::optional<std::string>& value) {
     return value.value_or("");
@@ -65,7 +68,8 @@ bool videoExists(bitedb::Database& database,
                  std::string& error) {
     exists = false;
     std::vector<bitedb::Database::QueryRow> rows;
-    const std::string sql = "SELECT 1 FROM videos WHERE status = 1 "
+    const std::string sql = "SELECT 1 FROM videos WHERE " +
+        PUBLIC_VIDEO_CONDITION + " "
         "AND video_id = '" + escapedVideoId + "' LIMIT 1";
     if (!database.query(sql, rows, error)) {
         return false;
@@ -173,6 +177,25 @@ std::string makeVideoId(unsigned long long nextId) {
     return out.str();
 }
 
+std::string makeEmailCode() {
+    static thread_local std::mt19937 generator(std::random_device{}());
+    std::uniform_int_distribution<int> distribution(0, 999999);
+    std::ostringstream out;
+    out << std::setw(6) << std::setfill('0') << distribution(generator);
+    return out.str();
+}
+
+std::string makeAuthcodeId() {
+    static thread_local std::mt19937 generator(std::random_device{}());
+    std::uniform_int_distribution<int> distribution(0, 15);
+    std::ostringstream out;
+    out << "email-code-";
+    for (int i = 0; i < 16; ++i) {
+        out << std::hex << distribution(generator);
+    }
+    return out.str();
+}
+
 }  // namespace
 
 MySqlVideoRepository::MySqlVideoRepository(bitedb::Database& database)
@@ -183,7 +206,8 @@ bool MySqlVideoRepository::list(std::vector<Video>& videos,
     videos.clear();
     std::vector<bitedb::Database::QueryRow> rows;
     const std::string sql = VIDEO_SELECT +
-        "WHERE status = 1 ORDER BY published_on DESC, id DESC";
+        "WHERE " + PUBLIC_VIDEO_CONDITION +
+        " ORDER BY published_on DESC, id DESC";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
@@ -271,7 +295,22 @@ bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
         return false;
     }
 
-    return findById(videoId, video, error);
+    rows.clear();
+    const std::string selectSql = VIDEO_SELECT + "WHERE status = 1 "
+        "AND video_id = '" + escapedVideoId + "' LIMIT 1";
+    if (!database_.query(selectSql, rows, error)) {
+        return false;
+    }
+    if (rows.empty()) {
+        return true;
+    }
+
+    Video created;
+    if (!videoFromRow(rows.front(), created, error)) {
+        return false;
+    }
+    video = std::move(created);
+    return true;
 }
 
 bool MySqlVideoRepository::findById(const std::string& videoId,
@@ -284,7 +323,8 @@ bool MySqlVideoRepository::findById(const std::string& videoId,
     }
 
     std::vector<bitedb::Database::QueryRow> rows;
-    const std::string sql = VIDEO_SELECT + "WHERE status = 1 AND video_id = '" +
+    const std::string sql = VIDEO_SELECT + "WHERE " +
+        PUBLIC_VIDEO_CONDITION + " AND video_id = '" +
         escapedVideoId + "' LIMIT 1";
     if (!database_.query(sql, rows, error)) {
         return false;
@@ -313,7 +353,8 @@ bool MySqlVideoRepository::search(const std::string& keyword,
     std::vector<bitedb::Database::QueryRow> rows;
     const std::string pattern = "'%" + escapedKeyword + "%'";
     const std::string sql = VIDEO_SELECT +
-        "WHERE status = 1 AND (title LIKE " + pattern +
+        "WHERE " + PUBLIC_VIDEO_CONDITION +
+        " AND (title LIKE " + pattern +
         " OR user_name LIKE " + pattern +
         " OR category LIKE " + pattern +
         " OR CAST(tags AS CHAR) LIKE " + pattern +
@@ -345,7 +386,8 @@ bool MySqlVideoRepository::playUrl(const std::string& videoId,
 
     std::vector<bitedb::Database::QueryRow> rows;
     const std::string sql =
-        "SELECT play_url FROM videos WHERE status = 1 AND video_id = '" +
+        "SELECT play_url FROM videos WHERE " + PUBLIC_VIDEO_CONDITION +
+        " AND video_id = '" +
         escapedVideoId + "' LIMIT 1";
     if (!database_.query(sql, rows, error)) {
         return false;
@@ -381,7 +423,7 @@ bool MySqlVideoRepository::likeStatus(
         "WHERE vl.video_id = v.video_id AND vl.account = '" +
         escapedAccount + "'), CAST(v.like_count AS CHAR) "
         "FROM videos v WHERE v.video_id = '" + escapedVideoId +
-        "' AND v.status = 1 LIMIT 1";
+        "' AND v.status = 1 AND v.review_status = '审核通过' LIMIT 1";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
@@ -455,7 +497,7 @@ bool MySqlVideoRepository::watchProgress(
         "LEFT JOIN video_watch_progress wp "
         "ON wp.video_id = v.video_id AND wp.account = '" + escapedAccount +
         "' WHERE v.video_id = '" + escapedVideoId +
-        "' AND v.status = 1 LIMIT 1";
+        "' AND v.status = 1 AND v.review_status = '审核通过' LIMIT 1";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
@@ -525,7 +567,8 @@ bool MySqlVideoRepository::favoriteStatus(
         "SELECT EXISTS(SELECT 1 FROM video_favorites vf "
         "WHERE vf.video_id = v.video_id AND vf.account = '" +
         escapedAccount + "') FROM videos v WHERE v.video_id = '" +
-        escapedVideoId + "' AND v.status = 1 LIMIT 1";
+        escapedVideoId +
+        "' AND v.status = 1 AND v.review_status = '审核通过' LIMIT 1";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
@@ -589,7 +632,8 @@ bool MySqlVideoRepository::favoriteVideos(const std::string& account,
         "videos.category, CAST(videos.tags AS CHAR), videos.description "
         "FROM videos "
         "INNER JOIN video_favorites vf ON vf.video_id = videos.video_id "
-        "WHERE videos.status = 1 AND vf.account = '" + escapedAccount +
+        "WHERE videos.status = 1 AND videos.review_status = '审核通过' "
+        "AND vf.account = '" + escapedAccount +
         "' ORDER BY vf.created_at DESC, vf.id DESC";
     if (!database_.query(sql, rows, error)) {
         return false;
@@ -935,42 +979,28 @@ bool MySqlVideoRepository::createEmailCode(const std::string& email,
         return true;
     }
 
-    const std::string debugCode = "246810";
+    const std::string debugCode = makeEmailCode();
+    const std::string authcodeId = makeAuthcodeId();
     std::string escapedEmail;
     std::string escapedCode;
+    std::string escapedAuthcodeId;
     if (!database_.escape(normalizedEmail, escapedEmail, error) ||
-        !database_.escape(debugCode, escapedCode, error)) {
+        !database_.escape(debugCode, escapedCode, error) ||
+        !database_.escape(authcodeId, escapedAuthcodeId, error)) {
         return false;
     }
 
     const std::string insertSql =
-        "INSERT INTO email_login_codes (authcode_id, email, authcode) "
-        "VALUES ('pending', '" + escapedEmail + "', '" + escapedCode + "')";
+        "INSERT INTO email_login_codes "
+        "(authcode_id, email, authcode, expires_at) "
+        "VALUES ('" + escapedAuthcodeId + "', '" + escapedEmail + "', '" +
+        escapedCode + "', DATE_ADD(NOW(), INTERVAL 10 MINUTE))";
     if (!database_.execute(insertSql, error)) {
         return false;
     }
 
-    std::vector<bitedb::Database::QueryRow> rows;
-    const std::string updateSql =
-        "UPDATE email_login_codes SET authcode_id = "
-        "CONCAT('email-code-', LPAD(id, 3, '0')) "
-        "WHERE id = LAST_INSERT_ID()";
-    if (!database_.execute(updateSql, error)) {
-        return false;
-    }
-    const std::string selectSql =
-        "SELECT authcode_id, authcode FROM email_login_codes "
-        "WHERE id = LAST_INSERT_ID()";
-    if (!database_.query(selectSql, rows, error)) {
-        return false;
-    }
-    if (rows.empty() || rows.front().size() != 2) {
-        error = "验证码会话创建后无法读取";
-        return false;
-    }
-
-    session.authcodeId = valueOrEmpty(rows.front()[0]);
-    session.debugCode = valueOrEmpty(rows.front()[1]);
+    session.authcodeId = authcodeId;
+    session.debugCode = debugCode;
     return true;
 }
 
@@ -996,7 +1026,7 @@ bool MySqlVideoRepository::emailLogin(
         "SELECT id FROM email_login_codes WHERE authcode_id = '" +
         escapedAuthcodeId + "' AND email = '" + escapedEmail +
         "' AND authcode = '" + escapedAuthcode +
-        "' AND consumed = 0 LIMIT 1";
+        "' AND consumed = 0 AND expires_at > NOW() LIMIT 1";
     if (!database_.query(codeSql, rows, error)) {
         return false;
     }

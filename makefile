@@ -8,7 +8,7 @@ server: source/server_main.cc source/http_server.cc source/config.cc \
 		source/database.cc source/video.cc source/video_repository.cc \
 		source/util.cc source/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_server \
-		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \
+		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -lodb-mysql -lodb \
 		-lmysqlclient -pthread
 
 migrate: source/migrate_main.cc source/config.cc source/database.cc \

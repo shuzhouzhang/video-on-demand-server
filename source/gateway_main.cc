@@ -203,15 +203,26 @@ void forwardToDownstream(const GatewaySettings& settings,
     client.set_read_timeout(timeout);
     client.set_write_timeout(timeout);
 
-    httplib::Request forwarded;
-    forwarded.method = request.method;
-    forwarded.path = target;
-    forwarded.body = request.body;
-    forwarded.headers = request.headers;
-    forwarded.headers.erase("Host");
-    forwarded.set_header("X-Request-Id", requestId);
+    httplib::Headers headers = request.headers;
+    headers.erase("Host");
+    headers.erase("Content-Length");
+    headers.erase("Transfer-Encoding");
+    headers.erase("X-Request-Id");
+    headers.emplace("X-Request-Id", requestId);
 
-    const auto result = client.send(forwarded);
+    const std::string contentType = request.get_header_value("Content-Type");
+    httplib::Result result;
+    if (request.method == "GET") {
+        result = client.Get(target.c_str(), headers);
+    } else if (request.method == "POST") {
+        result = client.Post(target.c_str(), headers, request.body, contentType);
+    } else {
+        Json::Value body;
+        body["success"] = false;
+        body["message"] = "gateway method not allowed";
+        setJsonResponse(response, 405, body);
+        return;
+    }
     if (!result) {
         Json::Value body;
         body["success"] = false;
@@ -225,9 +236,9 @@ void forwardToDownstream(const GatewaySettings& settings,
     response.status = result->status;
     response.headers = result->headers;
     response.set_header("X-Request-Id", requestId);
-    const std::string contentType = result->get_header_value("Content-Type");
-    response.set_content(result->body, contentType.empty()
-        ? "application/octet-stream" : contentType.c_str());
+    const std::string responseContentType = result->get_header_value("Content-Type");
+    response.set_content(result->body, responseContentType.empty()
+        ? "application/octet-stream" : responseContentType.c_str());
 }
 
 }  // namespace

@@ -9,4 +9,4 @@ CREATE TABLE IF NOT EXISTS video_favorites (
     CONSTRAINT fk_video_favorites_video
         FOREIGN KEY (video_id) REFERENCES videos(video_id)
         ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

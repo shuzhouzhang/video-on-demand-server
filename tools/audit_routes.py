@@ -64,7 +64,9 @@ def extract_routes(source: str, method: str) -> set[str]:
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    source = (root / "source" / "http_server.cc").read_text(encoding="utf-8")
+    source = (root / "server" / "common" / "http_server.cc").read_text(
+        encoding="utf-8"
+    )
 
     actual_get = extract_routes(source, "Get")
     actual_post = extract_routes(source, "Post")

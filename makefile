@@ -6,45 +6,59 @@ GATEWAY_CONFIG ?= conf/gateway.local.json
 SERVICES_CONFIG ?= conf/services.local.json
 USER_SERVICE_CONFIG ?= conf/user_service.local.json
 VIDEO_SERVICE_CONFIG ?= conf/video_service.local.json
-INTERACTION_SERVICE_CONFIG ?= conf/interaction_service.local.json
+FILE_SERVICE_CONFIG ?= conf/file_service.local.json
 GATEWAY_LOG ?= /tmp/api_gateway_dev.log
 USER_SERVICE_LOG ?= /tmp/user_service_dev.log
 VIDEO_SERVICE_LOG ?= /tmp/video_service_dev.log
-INTERACTION_SERVICE_LOG ?= /tmp/interaction_service_dev.log
-BASE_URL ?= http://127.0.0.1:9000
-COMMON_SOURCES = source/config.cc source/database.cc source/video.cc \
-		source/video_repository.cc source/util.cc source/bitelog.cc
+FILE_SERVICE_LOG ?= /tmp/file_service_dev.log
+BASE_URL ?= http://127.0.0.1:10000
+COMMON_SOURCES = server/common/config.cc server/common/redis_session_manager.cc \
+		server/database/database.cc \
+		server/video_service/video.cc server/video_service/video_repository.cc \
+		server/user_service/user_repository.cc server/common/util.cc \
+		server/common/bitelog.cc
 COMMON_LIBS = -L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \
-		-lmysqlclient -lcpp-httplib -pthread
+		-lmysqlclient -lcpp-httplib -lhiredis -pthread
 
-server: source/server_main.cc source/http_server.cc source/config.cc \
-		source/database.cc source/video.cc source/video_repository.cc \
-		source/util.cc source/bitelog.cc
+server: server/common/server_main.cc server/common/http_server.cc \
+		$(COMMON_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_server \
 		$(COMMON_LIBS)
 
-user_service: source/service_main.cc source/http_server.cc $(COMMON_SOURCES)
+user_service: server/user_service/main.cc server/common/http_server.cc \
+		$(COMMON_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o user_service \
 		$(COMMON_LIBS)
 
-video_service: source/service_main.cc source/http_server.cc $(COMMON_SOURCES)
+video_service: server/video_service/main.cc server/common/http_server.cc \
+		$(COMMON_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_service \
 		$(COMMON_LIBS)
 
-interaction_service: source/service_main.cc source/http_server.cc $(COMMON_SOURCES)
+file_service: server/file_service/main.cc server/common/config.cc \
+		server/common/util.cc server/common/bitelog.cc
+	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o file_service \
+		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread
+
+interaction_service: source/service_main.cc source/http_server.cc \
+		$(COMMON_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o interaction_service \
 		$(COMMON_LIBS)
 
-api_gateway: source/gateway_main.cc source/util.cc source/bitelog.cc
+api_gateway: server/gateway_service/main.cc server/common/http_client.cc \
+		server/common/config.cc server/common/redis_session_manager.cc \
+		server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o api_gateway \
-		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread
+		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib \
+		-lhiredis -pthread
 
-microservices: api_gateway user_service video_service interaction_service
+microservices: api_gateway user_service video_service file_service
 
-migrate: source/migrate_main.cc source/config.cc source/database.cc \
-		source/util.cc source/bitelog.cc
+migrate: server/database/migrate_main.cc server/common/config.cc \
+		server/database/database.cc server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o database_migrate \
-		$(COMMON_LIBS)
+		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \
+		-lmysqlclient -lcpp-httplib -pthread
 
 # Run the project's current automated test suite from one stable entry point.
 test:
@@ -95,13 +109,13 @@ dev-smoke-write:
 
 # Compile and start the local lightweight microservice demo.
 dev-start-ms: microservices
-	@for file in "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" "$(USER_SERVICE_CONFIG)" "$(VIDEO_SERVICE_CONFIG)" "$(INTERACTION_SERVICE_CONFIG)"; do \
+	@for file in "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" "$(USER_SERVICE_CONFIG)" "$(VIDEO_SERVICE_CONFIG)" "$(FILE_SERVICE_CONFIG)"; do \
 		if [ ! -f "$$file" ]; then echo "$$file not found."; exit 1; fi; \
 	done
 	@$(MAKE) dev-stop-ms >/dev/null || true
 	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./user_service "$(USER_SERVICE_CONFIG)" > "$(USER_SERVICE_LOG)" 2>&1 < /dev/null
 	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./video_service "$(VIDEO_SERVICE_CONFIG)" > "$(VIDEO_SERVICE_LOG)" 2>&1 < /dev/null
-	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./interaction_service "$(INTERACTION_SERVICE_CONFIG)" > "$(INTERACTION_SERVICE_LOG)" 2>&1 < /dev/null
+	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./file_service "$(FILE_SERVICE_CONFIG)" > "$(FILE_SERVICE_LOG)" 2>&1 < /dev/null
 	@sleep 1
 	@setsid -f ./api_gateway "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" > "$(GATEWAY_LOG)" 2>&1 < /dev/null
 	@sleep 1
@@ -112,6 +126,7 @@ dev-stop-ms:
 	@pkill -x api_gateway 2>/dev/null || true
 	@pkill -x user_service 2>/dev/null || true
 	@pkill -x video_service 2>/dev/null || true
+	@pkill -x file_service 2>/dev/null || true
 	@pkill -f '^\./interaction_service ' 2>/dev/null || true
 	@echo "microservices stopped"
 
@@ -120,11 +135,11 @@ dev-status-ms:
 	@pgrep -a api_gateway || { echo "api_gateway is not running"; exit 1; }
 	@pgrep -a user_service || { echo "user_service is not running"; exit 1; }
 	@pgrep -a video_service || { echo "video_service is not running"; exit 1; }
-	@pgrep -af '^\./interaction_service ' || { echo "interaction_service is not running"; exit 1; }
-	@curl -fsS "http://127.0.0.1:9000/healthz" >/dev/null && echo "api_gateway healthz ok"
-	@curl -fsS "http://127.0.0.1:9101/healthz" >/dev/null && echo "user_service healthz ok"
-	@curl -fsS "http://127.0.0.1:9102/healthz" >/dev/null && echo "video_service healthz ok"
-	@curl -fsS "http://127.0.0.1:9103/healthz" >/dev/null && echo "interaction_service healthz ok"
+	@pgrep -a file_service || { echo "file_service is not running"; exit 1; }
+	@curl -fsS "http://127.0.0.1:10000/healthz" >/dev/null && echo "api_gateway healthz ok"
+	@curl -fsS "http://127.0.0.1:10002/healthz" >/dev/null && echo "user_service healthz ok"
+	@curl -fsS "http://127.0.0.1:10003/healthz" >/dev/null && echo "video_service healthz ok"
+	@curl -fsS "http://127.0.0.1:10001/healthz" >/dev/null && echo "file_service healthz ok"
 
 dev-smoke-ms:
 	@if ! pgrep -x api_gateway >/dev/null; then $(MAKE) dev-start-ms; fi
@@ -145,5 +160,6 @@ clean:
 	rm -f api_gateway
 	rm -f user_service
 	rm -f video_service
+	rm -f file_service
 	rm -f interaction_service
 	rm -f database_migrate

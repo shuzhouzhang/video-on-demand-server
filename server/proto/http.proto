@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package vod.api;
+
+message HttpRoute {
+  string method = 1;
+  string path = 2;
+  string downstream_service = 3;
+  bool requires_auth = 4;
+}

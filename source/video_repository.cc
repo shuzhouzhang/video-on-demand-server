@@ -1,1 +1,1 @@
-#include "../server/video_service/video_repository.cc"
+#include "../server/svc_video/video_repository.cc"

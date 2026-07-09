@@ -1,1 +1,1 @@
-#include "../server/gateway_service/main.cc"
+#include "../server/svc_gateway/main.cc"

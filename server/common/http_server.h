@@ -3,7 +3,7 @@
  */
 #pragma once
 
-#include "../video_service/video_repository.h"
+#include "../svc_video/video_repository.h"
 
 #include <cstdint>
 #include <memory>

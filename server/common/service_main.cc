@@ -2,8 +2,8 @@
 #include "http_server.h"
 #include "redis_session_manager.h"
 #include "../database/database.h"
-#include "../user_service/user_repository.h"
-#include "../video_service/video_repository.h"
+#include "../svc_user/user_repository.h"
+#include "../svc_video/video_repository.h"
 
 #include <filesystem>
 #include <iostream>

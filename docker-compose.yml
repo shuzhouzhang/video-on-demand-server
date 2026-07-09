@@ -57,6 +57,14 @@ services:
     volumes:
       - uploads_data:/app/uploads
 
+
+  transcode_service:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: sh -c "make transcode_service && ./transcode_service conf/transcode_service.docker.json"
+
   gateway_service:
     build: .
     depends_on:
@@ -65,6 +73,8 @@ services:
       video_service:
         condition: service_started
       file_service:
+        condition: service_started
+      transcode_service:
         condition: service_started
       redis:
         condition: service_healthy

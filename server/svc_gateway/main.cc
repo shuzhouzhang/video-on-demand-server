@@ -26,6 +26,7 @@ struct GatewaySettings {
     Downstream user{"user_service", "http://127.0.0.1:9101"};
     Downstream video{"video_service", "http://127.0.0.1:9102"};
     Downstream file{"file_service", "http://127.0.0.1:9104"};
+    Downstream transcode{"transcode_service", "http://127.0.0.1:10004"};
     int timeoutMs = 3000;
     biteconfig::RedisSettings redis;
 };
@@ -86,6 +87,7 @@ bool loadServices(const std::string& path, GatewaySettings& settings,
     loadUrl("user_service", settings.user);
     loadUrl("video_service", settings.video);
     loadUrl("file_service", settings.file);
+    loadUrl("transcode_service", settings.transcode);
     if ((*root)["timeout_ms"].isInt() && (*root)["timeout_ms"].asInt() > 0) {
         settings.timeoutMs = (*root)["timeout_ms"].asInt();
     }
@@ -152,6 +154,9 @@ const Downstream* selectDownstream(const GatewaySettings& settings,
     }
     if (path == "/files/upload" || path.rfind("/uploads/", 0) == 0) {
         return &settings.file;
+    }
+    if (path == "/transcode/jobs") {
+        return &settings.transcode;
     }
     if (path == "/videos" || path == "/videos/detail" ||
         path == "/videos/search" || path == "/videos/play-url" ||

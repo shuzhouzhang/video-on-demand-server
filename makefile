@@ -1,4 +1,4 @@
-.PHONY: server migrate microservices test audit-routes smoke dev-start dev-stop dev-status dev-smoke dev-smoke-write dev-start-ms dev-stop-ms dev-status-ms dev-smoke-ms dev-smoke-write-ms clean
+.PHONY: server migrate microservices transcode_service test audit-routes smoke dev-start dev-stop dev-status dev-smoke dev-smoke-write dev-start-ms dev-stop-ms dev-status-ms dev-smoke-ms dev-smoke-write-ms clean
 
 DEV_CONFIG ?= conf/server.local.json
 DEV_LOG ?= /tmp/video_server_dev.log
@@ -7,15 +7,17 @@ SERVICES_CONFIG ?= conf/services.local.json
 USER_SERVICE_CONFIG ?= conf/user_service.local.json
 VIDEO_SERVICE_CONFIG ?= conf/video_service.local.json
 FILE_SERVICE_CONFIG ?= conf/file_service.local.json
+TRANSCODE_SERVICE_CONFIG ?= conf/transcode_service.local.json
 GATEWAY_LOG ?= /tmp/api_gateway_dev.log
 USER_SERVICE_LOG ?= /tmp/user_service_dev.log
 VIDEO_SERVICE_LOG ?= /tmp/video_service_dev.log
 FILE_SERVICE_LOG ?= /tmp/file_service_dev.log
+TRANSCODE_SERVICE_LOG ?= /tmp/transcode_service_dev.log
 BASE_URL ?= http://127.0.0.1:10000
 COMMON_SOURCES = server/common/config.cc server/common/redis_session_manager.cc \
 		server/database/database.cc \
-		server/video_service/video.cc server/video_service/video_repository.cc \
-		server/user_service/user_repository.cc server/common/util.cc \
+		server/svc_video/video.cc server/svc_video/video_repository.cc \
+		server/svc_user/user_repository.cc server/common/util.cc \
 		server/common/bitelog.cc
 COMMON_LIBS = -L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \
 		-lmysqlclient -lcpp-httplib -lhiredis -pthread
@@ -25,19 +27,24 @@ server: server/common/server_main.cc server/common/http_server.cc \
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_server \
 		$(COMMON_LIBS)
 
-user_service: server/user_service/main.cc server/common/http_server.cc \
+user_service: server/svc_user/main.cc server/common/http_server.cc \
 		$(COMMON_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o user_service \
 		$(COMMON_LIBS)
 
-video_service: server/video_service/main.cc server/common/http_server.cc \
+video_service: server/svc_video/main.cc server/common/http_server.cc \
 		$(COMMON_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_service \
 		$(COMMON_LIBS)
 
-file_service: server/file_service/main.cc server/common/config.cc \
+file_service: server/svc_file/main.cc server/common/config.cc \
 		server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o file_service \
+		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread
+
+transcode_service: server/svc_transcode/main.cc server/common/config.cc \
+		server/common/util.cc server/common/bitelog.cc
+	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o transcode_service \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread
 
 interaction_service: source/service_main.cc source/http_server.cc \
@@ -45,14 +52,14 @@ interaction_service: source/service_main.cc source/http_server.cc \
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o interaction_service \
 		$(COMMON_LIBS)
 
-api_gateway: server/gateway_service/main.cc server/common/http_client.cc \
+api_gateway: server/svc_gateway/main.cc server/common/http_client.cc \
 		server/common/config.cc server/common/redis_session_manager.cc \
 		server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o api_gateway \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib \
 		-lhiredis -pthread
 
-microservices: api_gateway user_service video_service file_service
+microservices: api_gateway user_service video_service file_service transcode_service
 
 migrate: server/database/migrate_main.cc server/common/config.cc \
 		server/database/database.cc server/common/util.cc server/common/bitelog.cc
@@ -109,13 +116,14 @@ dev-smoke-write:
 
 # Compile and start the local lightweight microservice demo.
 dev-start-ms: microservices
-	@for file in "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" "$(USER_SERVICE_CONFIG)" "$(VIDEO_SERVICE_CONFIG)" "$(FILE_SERVICE_CONFIG)"; do \
+	@for file in "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" "$(USER_SERVICE_CONFIG)" "$(VIDEO_SERVICE_CONFIG)" "$(FILE_SERVICE_CONFIG)" "$(TRANSCODE_SERVICE_CONFIG)"; do \
 		if [ ! -f "$$file" ]; then echo "$$file not found."; exit 1; fi; \
 	done
 	@$(MAKE) dev-stop-ms >/dev/null || true
 	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./user_service "$(USER_SERVICE_CONFIG)" > "$(USER_SERVICE_LOG)" 2>&1 < /dev/null
 	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./video_service "$(VIDEO_SERVICE_CONFIG)" > "$(VIDEO_SERVICE_LOG)" 2>&1 < /dev/null
 	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./file_service "$(FILE_SERVICE_CONFIG)" > "$(FILE_SERVICE_LOG)" 2>&1 < /dev/null
+	@setsid -f ./transcode_service "$(TRANSCODE_SERVICE_CONFIG)" > "$(TRANSCODE_SERVICE_LOG)" 2>&1 < /dev/null
 	@sleep 1
 	@setsid -f ./api_gateway "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" > "$(GATEWAY_LOG)" 2>&1 < /dev/null
 	@sleep 1
@@ -127,6 +135,7 @@ dev-stop-ms:
 	@pkill -x user_service 2>/dev/null || true
 	@pkill -x video_service 2>/dev/null || true
 	@pkill -x file_service 2>/dev/null || true
+	@pkill -f '^\./transcode_service ' 2>/dev/null || true
 	@pkill -f '^\./interaction_service ' 2>/dev/null || true
 	@echo "microservices stopped"
 
@@ -136,10 +145,12 @@ dev-status-ms:
 	@pgrep -a user_service || { echo "user_service is not running"; exit 1; }
 	@pgrep -a video_service || { echo "video_service is not running"; exit 1; }
 	@pgrep -a file_service || { echo "file_service is not running"; exit 1; }
+	@pgrep -af "\./transcode_service" || { echo "transcode_service is not running"; exit 1; }
 	@curl -fsS "http://127.0.0.1:10000/healthz" >/dev/null && echo "api_gateway healthz ok"
 	@curl -fsS "http://127.0.0.1:10002/healthz" >/dev/null && echo "user_service healthz ok"
 	@curl -fsS "http://127.0.0.1:10003/healthz" >/dev/null && echo "video_service healthz ok"
 	@curl -fsS "http://127.0.0.1:10001/healthz" >/dev/null && echo "file_service healthz ok"
+	@curl -fsS "http://127.0.0.1:10004/healthz" >/dev/null && echo "transcode_service healthz ok"
 
 dev-smoke-ms:
 	@if ! pgrep -x api_gateway >/dev/null; then $(MAKE) dev-start-ms; fi
@@ -161,5 +172,6 @@ clean:
 	rm -f user_service
 	rm -f video_service
 	rm -f file_service
+	rm -f transcode_service
 	rm -f interaction_service
 	rm -f database_migrate

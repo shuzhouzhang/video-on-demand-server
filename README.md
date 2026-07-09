@@ -50,6 +50,7 @@ video_server
 - `user_service`：用户登录、邮箱验证码登录、退出登录、用户资料、头像资料更新、后台用户管理。
 - `video_service`：视频元数据、列表、详情、搜索、播放地址、点赞、收藏、评论、弹幕、观看进度、审核。
 - `file_service`：文件服务入口，提供 `/uploads/...` 下载和 `POST /files/upload` 通用文件上传；现有 `/videos/upload`、`/users/avatar` 为兼容 Qt 客户端仍保留原路径。
+- `transcode_service`：对齐参考项目新增的转码服务入口，当前提供健康检查和 `/transcode/jobs` 任务接收骨架，后续接入 HLS/FFmpeg/MQ。
 - `common`：JSON、日志、配置、HTTP Client、RedisSessionManager 等公共能力。
 - `database`：MySQL 连接和迁移工具。
 
@@ -126,6 +127,7 @@ gateway_service  10000
 file_service     10001
 user_service     10002
 video_service    10003
+transcode_service 10004
 ```
 
 接口覆盖检查：
@@ -146,6 +148,7 @@ docker compose up --build
 - `user_service`
 - `video_service`
 - `file_service`
+- `transcode_service`
 - `mysql`
 - `redis`
 - `migrate`

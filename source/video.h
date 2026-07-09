@@ -1,3 +1,3 @@
 #pragma once
 
-#include "../server/video_service/video.h"
+#include "../server/svc_video/video.h"

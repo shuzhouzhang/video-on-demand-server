@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package vod.api;
+
+message DeleteFileMessage {
+  string public_url = 1;
+}
+
+message CacheInvalidationMessage {
+  string cache_key = 1;
+}
+
+message HlsTranscodeMessage {
+  int64 video_id = 1;
+  string source_file = 2;
+}

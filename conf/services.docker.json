@@ -8,5 +8,6 @@
     "host": "redis",
     "port": 6379,
     "session_ttl_seconds": 86400
-  }
+  },
+  "transcode_service": "http://transcode_service:10004"
 }

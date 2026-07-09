@@ -27,14 +27,16 @@ server: server/common/server_main.cc server/common/http_server.cc \
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_server \
 		$(COMMON_LIBS)
 
-user_service: server/svc_user/source/main.cc server/svc_user/source/svc_data.cc \
+user_service: server/svc_user/source/main.cc server/svc_user/source/svc_server.cc \
+		server/svc_user/source/svc_data.cc \
 		server/svc_user/source/svc_rpc.cc server/svc_user/source/svc_sync.cc \
 		server/svc_user/source/svc_mq.cc server/common/http_server.cc \
 		$(COMMON_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o user_service \
 		$(COMMON_LIBS)
 
-video_service: server/svc_video/source/main.cc server/svc_video/source/svc_data.cc \
+video_service: server/svc_video/source/main.cc server/svc_video/source/svc_server.cc \
+		server/svc_video/source/svc_data.cc \
 		server/svc_video/source/svc_rpc.cc server/svc_video/source/svc_sync.cc \
 		server/svc_video/source/svc_mq.cc server/common/http_server.cc \
 		$(COMMON_SOURCES)

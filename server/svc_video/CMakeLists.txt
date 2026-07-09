@@ -1,5 +1,6 @@
 add_executable(video_service
     source/main.cc
+    source/svc_server.cc
     source/video.cc
     source/video_repository.cc
     source/svc_data.cc

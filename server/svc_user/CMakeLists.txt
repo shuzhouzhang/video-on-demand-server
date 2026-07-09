@@ -1,5 +1,6 @@
 add_executable(user_service
     source/main.cc
+    source/svc_server.cc
     source/user_repository.cc
     source/svc_data.cc
     source/svc_rpc.cc

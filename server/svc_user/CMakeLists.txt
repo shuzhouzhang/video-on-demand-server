@@ -12,7 +12,7 @@ add_executable(user_service
     ../common/util.cc
     ../common/bitelog.cc
     ../database/database.cc
-    ../svc_video/source/video.cc
+    ../data/video.cc
     ../svc_video/source/video_repository.cc
 )
 
@@ -20,6 +20,7 @@ target_include_directories(user_service PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/source
     ${VOD_COMMON_DIR}
     ${VOD_DATABASE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../data
     ${VOD_SVC_VIDEO_DIR}
 )
 

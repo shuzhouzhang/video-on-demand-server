@@ -16,7 +16,7 @@ TRANSCODE_SERVICE_LOG ?= /tmp/transcode_service_dev.log
 BASE_URL ?= http://127.0.0.1:10000
 COMMON_SOURCES = server/common/config.cc server/common/redis_session_manager.cc \
 		server/database/database.cc \
-		server/svc_video/source/video.cc server/svc_video/source/video_repository.cc \
+		server/data/video.cc server/svc_video/source/video_repository.cc \
 		server/svc_user/source/user_repository.cc server/common/util.cc \
 		server/common/bitelog.cc
 COMMON_LIBS = -L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \

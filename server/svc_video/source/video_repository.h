@@ -4,6 +4,10 @@
 #pragma once
 
 #include "../../database/database.h"
+#include "../../data/admin_review.h"
+#include "../../data/user.h"
+#include "../../data/video_draft.h"
+#include "../../data/video_interaction.h"
 #include "video.h"
 
 #include <optional>
@@ -11,73 +15,6 @@
 #include <vector>
 
 namespace bitevideo {
-
-struct LikeStatus {
-    bool liked;
-    std::string likeCount;
-};
-
-struct WatchProgress {
-    int seconds;
-};
-
-struct FavoriteStatus {
-    bool favorited;
-};
-
-struct VideoComment {
-    std::string id;
-    std::string videoId;
-    std::string userName;
-    std::string account;
-    std::string content;
-    std::string createdAt;
-};
-
-struct VideoBarrage {
-    int seconds;
-    std::string text;
-};
-
-struct UserProfile {
-    std::string account;
-    std::string userName;
-    std::string description;
-    std::string avatarPath;
-};
-
-struct EmailCodeSession {
-    std::string authcodeId;
-    std::string debugCode;
-};
-
-struct AdminReview {
-    std::string videoId;
-    std::string title;
-    std::string userId;
-    std::string status;
-    std::string uploadTime;
-};
-
-struct AdminUser {
-    std::string account;
-    std::string userName;
-    std::string role;
-    std::string status;
-    std::string createdAt;
-};
-
-struct VideoDraft {
-    std::string title;
-    std::string userName;
-    std::string account;
-    std::string category;
-    std::vector<std::string> tags;
-    std::string description;
-    std::string playUrl;
-    std::string videoFileName;
-    std::string coverFileName;
-};
 
 class VideoStore {
 public:

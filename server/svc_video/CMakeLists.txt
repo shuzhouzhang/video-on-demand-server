@@ -1,7 +1,7 @@
 add_executable(video_service
     source/main.cc
     source/svc_server.cc
-    source/video.cc
+    ../data/video.cc
     source/video_repository.cc
     source/svc_data.cc
     source/svc_rpc.cc
@@ -20,6 +20,7 @@ target_include_directories(video_service PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/source
     ${VOD_COMMON_DIR}
     ${VOD_DATABASE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../data
     ${VOD_SVC_USER_DIR}
 )
 

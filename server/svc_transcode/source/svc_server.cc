@@ -1,4 +1,5 @@
 #include "svc_server.h"
+#include "svc_mq.h"
 
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
@@ -23,7 +24,7 @@ void setJsonResponse(httplib::Response& response,
         "application/json; charset=utf-8");
 }
 
-void registerRoutes(httplib::Server& server) {
+void registerRoutes(httplib::Server& server, const svc_transcode::MessageQueueFacade& mq) {
     server.Get("/health", [](const httplib::Request&,
                              httplib::Response& response) {
         Json::Value body;
@@ -40,7 +41,7 @@ void registerRoutes(httplib::Server& server) {
         body["status"] = "ok";
         setJsonResponse(response, 200, body);
     });
-    server.Post("/transcode/jobs", [](const httplib::Request& request,
+    server.Post("/transcode/jobs", [&mq](const httplib::Request& request,
                                       httplib::Response& response) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
@@ -52,17 +53,19 @@ void registerRoutes(httplib::Server& server) {
         }
         const std::string videoId = (*payload)["videoId"].asString();
         const std::string filePath = (*payload)["filePath"].asString();
-        if (videoId.empty() || filePath.empty()) {
+        svc_transcode::TranscodeJob job;
+        std::string error;
+        if (!mq.submitJob(videoId, filePath, job, error)) {
             body["success"] = false;
-            body["message"] = "videoId 和 filePath 不能为空";
+            body["message"] = error;
             setJsonResponse(response, 200, body);
             return;
         }
         body["success"] = true;
         body["message"] = "转码任务已接收";
-        body["data"]["videoId"] = videoId;
-        body["data"]["status"] = "PENDING";
-        body["data"]["note"] = "当前为第一阶段转码服务骨架，尚未接入 HLS/FFmpeg/MQ";
+        body["data"]["videoId"] = job.videoId;
+        body["data"]["status"] = job.status;
+        body["data"]["note"] = job.note;
         setJsonResponse(response, 202, body);
     });
 }
@@ -88,7 +91,8 @@ int TranscodeServerBuilder::start() const {
     bitelog::bitelog_init(settings->log);
 
     httplib::Server server;
-    registerRoutes(server);
+    MessageQueueFacade mq;
+    registerRoutes(server, mq);
 
     INF("transcode_service listening on 0.0.0.0:{}", settings->server.port);
     if (!server.listen("0.0.0.0", settings->server.port)) {

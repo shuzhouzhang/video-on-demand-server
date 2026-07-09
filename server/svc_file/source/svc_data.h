@@ -1,12 +1,27 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 
 namespace svc_file {
 
-class DataFacade {
+struct StoredFile {
+    std::string originalName;
+    std::string storedPath;
+    std::string publicUrl;
+};
+
+class FileDataFacade {
 public:
-    const char* name() const noexcept;
+    bool storeUploadedFile(const std::string& directory,
+                           const std::string& filename,
+                           const std::string& content,
+                           StoredFile& stored,
+                           std::string& error) const;
+
+    static constexpr std::size_t maxFileBytes() noexcept {
+        return 200 * 1024 * 1024;
+    }
 };
 
 }  // namespace svc_file

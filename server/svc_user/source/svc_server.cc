@@ -1,8 +1,8 @@
 #include "svc_server.h"
+#include "svc_rpc.h"
 
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
-#include "../../common/http_server.h"
 #include "../../common/redis_session_manager.h"
 #include "../../database/database.h"
 #include "user_repository.h"
@@ -45,16 +45,9 @@ int UserServerBuilder::start() const {
 
     std::unique_ptr<bitevideo::VideoStore> repository =
         std::make_unique<biteuser::MySqlUserRepository>(database);
-    biteserver::HttpServer server(*repository,
-                                  biteserver::ServiceRole::User,
-                                  "user_service",
-                                  sessionManager.enabled()
-                                      ? &sessionManager : nullptr);
-    if (!server.listen("0.0.0.0", settings->server.port)) {
-        ERR("user_service failed to listen on port {}", settings->server.port);
-        return 1;
-    }
-    return 0;
+    UserRpcService rpc(*repository,
+                   sessionManager.enabled() ? &sessionManager : nullptr);
+    return rpc.listen("0.0.0.0", settings->server.port);
 }
 
 }  // namespace svc_user

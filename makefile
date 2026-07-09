@@ -62,6 +62,7 @@ interaction_service: source/service_main.cc source/http_server.cc \
 		$(COMMON_LIBS)
 
 api_gateway: server/svc_gateway/source/main.cc \
+		server/svc_gateway/source/svc_server.cc \
 		server/svc_gateway/source/svc_data.cc server/svc_gateway/source/svc_rpc.cc \
 		server/common/http_client.cc server/common/config.cc server/common/redis_session_manager.cc \
 		server/common/util.cc server/common/bitelog.cc

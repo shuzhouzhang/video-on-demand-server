@@ -16,8 +16,8 @@ TRANSCODE_SERVICE_LOG ?= /tmp/transcode_service_dev.log
 BASE_URL ?= http://127.0.0.1:10000
 COMMON_SOURCES = server/common/config.cc server/common/redis_session_manager.cc \
 		server/database/database.cc \
-		server/svc_video/video.cc server/svc_video/video_repository.cc \
-		server/svc_user/user_repository.cc server/common/util.cc \
+		server/svc_video/source/video.cc server/svc_video/source/video_repository.cc \
+		server/svc_user/source/user_repository.cc server/common/util.cc \
 		server/common/bitelog.cc
 COMMON_LIBS = -L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \
 		-lmysqlclient -lcpp-httplib -lhiredis -pthread
@@ -27,22 +27,22 @@ server: server/common/server_main.cc server/common/http_server.cc \
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_server \
 		$(COMMON_LIBS)
 
-user_service: server/svc_user/main.cc server/common/http_server.cc \
+user_service: server/svc_user/source/main.cc server/common/http_server.cc \
 		$(COMMON_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o user_service \
 		$(COMMON_LIBS)
 
-video_service: server/svc_video/main.cc server/common/http_server.cc \
+video_service: server/svc_video/source/main.cc server/common/http_server.cc \
 		$(COMMON_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_service \
 		$(COMMON_LIBS)
 
-file_service: server/svc_file/main.cc server/common/config.cc \
+file_service: server/svc_file/source/main.cc server/common/config.cc \
 		server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o file_service \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread
 
-transcode_service: server/svc_transcode/main.cc server/common/config.cc \
+transcode_service: server/svc_transcode/source/main.cc server/common/config.cc \
 		server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o transcode_service \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread
@@ -52,7 +52,7 @@ interaction_service: source/service_main.cc source/http_server.cc \
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o interaction_service \
 		$(COMMON_LIBS)
 
-api_gateway: server/svc_gateway/main.cc server/common/http_client.cc \
+api_gateway: server/svc_gateway/source/main.cc server/common/http_client.cc \
 		server/common/config.cc server/common/redis_session_manager.cc \
 		server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o api_gateway \

@@ -1,7 +1,7 @@
-#include "../common/config.h"
-#include "../common/http_client.h"
-#include "../common/redis_session_manager.h"
-#include "../common/util.h"
+#include "../../common/config.h"
+#include "../../common/http_client.h"
+#include "../../common/redis_session_manager.h"
+#include "../../common/util.h"
 
 #include <httplib.h>
 #include <jsoncpp/json/json.h>

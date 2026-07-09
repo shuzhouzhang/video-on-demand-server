@@ -1,7 +1,7 @@
 #include "config.h"
 #include "http_server.h"
 #include "../database/database.h"
-#include "../svc_video/video_repository.h"
+#include "../svc_video/source/video_repository.h"
 
 #include <iostream>
 #include <string>

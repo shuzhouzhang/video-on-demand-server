@@ -1,6 +1,6 @@
-#include "../common/bitelog.h"
-#include "../common/config.h"
-#include "../common/util.h"
+#include "../../common/bitelog.h"
+#include "../../common/config.h"
+#include "../../common/util.h"
 
 #include <httplib.h>
 #include <jsoncpp/json/json.h>

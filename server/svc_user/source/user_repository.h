@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../database/database.h"
-#include "../svc_video/video_repository.h"
+#include "../../database/database.h"
+#include "../../svc_video/source/video_repository.h"
 
 namespace biteuser {
 

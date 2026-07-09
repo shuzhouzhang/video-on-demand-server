@@ -1,11 +1,11 @@
 #include "svc_server.h"
+#include "svc_data.h"
 #include "svc_rpc.h"
 
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
 #include "../../common/redis_session_manager.h"
 #include "../../database/database.h"
-#include "video_repository.h"
 
 #include <iostream>
 #include <memory>
@@ -43,8 +43,8 @@ int VideoServerBuilder::start() const {
         return 1;
     }
 
-    std::unique_ptr<bitevideo::VideoStore> repository =
-        std::make_unique<bitevideo::MySqlVideoRepository>(database);
+    VideoDataFacade data(database);
+    auto repository = data.createRepository();
     VideoRpcService rpc(*repository,
                    sessionManager.enabled() ? &sessionManager : nullptr);
     return rpc.listen("0.0.0.0", settings->server.port);

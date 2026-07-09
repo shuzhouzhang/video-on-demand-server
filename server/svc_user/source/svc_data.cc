@@ -1,9 +1,13 @@
 #include "svc_data.h"
 
+#include "user_repository.h"
+
 namespace svc_user {
 
-const char* DataFacade::name() const noexcept {
-    return "data access boundary";
+UserDataFacade::UserDataFacade(bitedb::Database& database) : database_(database) {}
+
+std::unique_ptr<bitevideo::VideoStore> UserDataFacade::createRepository() const {
+    return std::make_unique<biteuser::MySqlUserRepository>(database_);
 }
 
 }  // namespace svc_user

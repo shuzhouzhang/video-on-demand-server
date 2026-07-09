@@ -53,7 +53,7 @@ file_service: server/svc_file/source/main.cc server/svc_file/source/svc_server.c
 transcode_service: server/svc_transcode/source/main.cc \
 		server/svc_transcode/source/svc_server.cc \
 		server/svc_transcode/source/svc_data.cc server/svc_transcode/source/svc_rpc.cc \
-		server/svc_transcode/source/svc_mq.cc \
+		server/svc_transcode/source/svc_mq.cc server/svc_transcode/source/svc_worker.cc \
 		server/common/config.cc server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o transcode_service \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread

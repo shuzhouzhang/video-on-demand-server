@@ -4,6 +4,7 @@ add_executable(transcode_service
     source/svc_data.cc
     source/svc_rpc.cc
     source/svc_mq.cc
+    source/svc_worker.cc
     ../common/config.cc
     ../common/util.cc
     ../common/bitelog.cc

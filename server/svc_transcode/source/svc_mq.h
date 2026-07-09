@@ -1,5 +1,7 @@
 #pragma once
 
+#include "svc_worker.h"
+
 #include <string>
 
 namespace svc_transcode {
@@ -13,10 +15,15 @@ struct TranscodeJob {
 
 class MessageQueueFacade {
 public:
+    explicit MessageQueueFacade(SvcWorker& worker);
+
     bool submitJob(const std::string& videoId,
                    const std::string& filePath,
                    TranscodeJob& job,
                    std::string& error) const;
+
+private:
+    SvcWorker& worker_;
 };
 
 }  // namespace svc_transcode

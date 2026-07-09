@@ -91,7 +91,8 @@ int TranscodeServerBuilder::start() const {
     bitelog::bitelog_init(settings->log);
 
     httplib::Server server;
-    MessageQueueFacade mq;
+    SvcWorker worker;
+    MessageQueueFacade mq(worker);
     registerRoutes(server, mq);
 
     INF("transcode_service listening on 0.0.0.0:{}", settings->server.port);

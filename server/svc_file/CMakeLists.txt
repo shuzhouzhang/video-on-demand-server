@@ -1,6 +1,11 @@
 add_executable(file_service
     source/main.cc
     source/file_repository.cc
+    source/svc_server.cc
+    source/svc_data.cc
+    source/svc_rpc.cc
+    source/svc_sync.cc
+    source/svc_mq.cc
     ../common/config.cc
     ../common/util.cc
     ../common/bitelog.cc

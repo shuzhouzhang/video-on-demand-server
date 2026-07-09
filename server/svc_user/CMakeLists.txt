@@ -1,6 +1,10 @@
 add_executable(user_service
     source/main.cc
     source/user_repository.cc
+    source/svc_data.cc
+    source/svc_rpc.cc
+    source/svc_sync.cc
+    source/svc_mq.cc
     ../common/http_server.cc
     ../common/config.cc
     ../common/redis_session_manager.cc

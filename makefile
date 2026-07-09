@@ -27,23 +27,32 @@ server: server/common/server_main.cc server/common/http_server.cc \
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_server \
 		$(COMMON_LIBS)
 
-user_service: server/svc_user/source/main.cc server/common/http_server.cc \
+user_service: server/svc_user/source/main.cc server/svc_user/source/svc_data.cc \
+		server/svc_user/source/svc_rpc.cc server/svc_user/source/svc_sync.cc \
+		server/svc_user/source/svc_mq.cc server/common/http_server.cc \
 		$(COMMON_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o user_service \
 		$(COMMON_LIBS)
 
-video_service: server/svc_video/source/main.cc server/common/http_server.cc \
+video_service: server/svc_video/source/main.cc server/svc_video/source/svc_data.cc \
+		server/svc_video/source/svc_rpc.cc server/svc_video/source/svc_sync.cc \
+		server/svc_video/source/svc_mq.cc server/common/http_server.cc \
 		$(COMMON_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_service \
 		$(COMMON_LIBS)
 
-file_service: server/svc_file/source/main.cc server/common/config.cc \
-		server/common/util.cc server/common/bitelog.cc
+file_service: server/svc_file/source/main.cc server/svc_file/source/svc_server.cc \
+		server/svc_file/source/svc_data.cc server/svc_file/source/svc_rpc.cc \
+		server/svc_file/source/svc_sync.cc server/svc_file/source/svc_mq.cc \
+		server/common/config.cc server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o file_service \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread
 
-transcode_service: server/svc_transcode/source/main.cc server/common/config.cc \
-		server/common/util.cc server/common/bitelog.cc
+transcode_service: server/svc_transcode/source/main.cc \
+		server/svc_transcode/source/svc_server.cc \
+		server/svc_transcode/source/svc_data.cc server/svc_transcode/source/svc_rpc.cc \
+		server/svc_transcode/source/svc_mq.cc \
+		server/common/config.cc server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o transcode_service \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread
 
@@ -52,8 +61,9 @@ interaction_service: source/service_main.cc source/http_server.cc \
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o interaction_service \
 		$(COMMON_LIBS)
 
-api_gateway: server/svc_gateway/source/main.cc server/common/http_client.cc \
-		server/common/config.cc server/common/redis_session_manager.cc \
+api_gateway: server/svc_gateway/source/main.cc \
+		server/svc_gateway/source/svc_data.cc server/svc_gateway/source/svc_rpc.cc \
+		server/common/http_client.cc server/common/config.cc server/common/redis_session_manager.cc \
 		server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o api_gateway \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib \

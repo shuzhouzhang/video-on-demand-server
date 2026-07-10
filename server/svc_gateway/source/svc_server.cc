@@ -3,6 +3,7 @@
 #include "../../common/config.h"
 #include "../../common/http_client.h"
 #include "../../common/redis_session_manager.h"
+#include "../../common/service_registry.h"
 #include "../../common/util.h"
 
 #include <httplib.h>
@@ -19,19 +20,9 @@
 
 namespace {
 
-struct Downstream {
-    std::string name;
-    std::string baseUrl;
-};
-
 struct GatewaySettings {
     std::uint16_t port = 9000;
-    Downstream user{"user_service", "http://127.0.0.1:9101"};
-    Downstream video{"video_service", "http://127.0.0.1:9102"};
-    Downstream file{"file_service", "http://127.0.0.1:9104"};
-    Downstream transcode{"transcode_service", "http://127.0.0.1:10004"};
-    int timeoutMs = 3000;
-    biteconfig::RedisSettings redis;
+    bitesvc::DiscoverySettings discovery;
 };
 
 std::atomic<unsigned long long> g_requestCounter{0};
@@ -76,49 +67,6 @@ bool loadGatewayPort(const std::string& path, GatewaySettings& settings,
     return true;
 }
 
-bool loadServices(const std::string& path, GatewaySettings& settings,
-                  std::string& error) {
-    const auto root = readJsonFile(path, error);
-    if (!root) {
-        return false;
-    }
-    const auto loadUrl = [&](const char* key, Downstream& downstream) {
-        if ((*root)[key].isString() && !(*root)[key].asString().empty()) {
-            downstream.baseUrl = (*root)[key].asString();
-        }
-    };
-    loadUrl("user_service", settings.user);
-    loadUrl("video_service", settings.video);
-    loadUrl("file_service", settings.file);
-    loadUrl("transcode_service", settings.transcode);
-    if ((*root)["timeout_ms"].isInt() && (*root)["timeout_ms"].asInt() > 0) {
-        settings.timeoutMs = (*root)["timeout_ms"].asInt();
-    }
-    const Json::Value& redis = (*root)["redis"];
-    if (redis.isObject()) {
-        if (redis["enabled"].isBool()) {
-            settings.redis.enabled = redis["enabled"].asBool();
-        }
-        if (redis["host"].isString() && !redis["host"].asString().empty()) {
-            settings.redis.host = redis["host"].asString();
-        }
-        if (redis["port"].isInt() && redis["port"].asInt() > 0 &&
-            redis["port"].asInt() <= 65535) {
-            settings.redis.port =
-                static_cast<std::uint16_t>(redis["port"].asInt());
-        }
-        if (redis["password"].isString()) {
-            settings.redis.password = redis["password"].asString();
-        }
-        if (redis["session_ttl_seconds"].isInt() &&
-            redis["session_ttl_seconds"].asInt() > 0) {
-            settings.redis.sessionTtlSeconds =
-                redis["session_ttl_seconds"].asInt();
-        }
-    }
-    return true;
-}
-
 std::string requestPathWithQuery(const httplib::Request& request) {
     if (!request.target.empty()) {
         return request.target;
@@ -139,38 +87,36 @@ std::string makeRequestId() {
         std::to_string(++g_requestCounter);
 }
 
-const Downstream* selectDownstream(const GatewaySettings& settings,
-                                   const std::string& path) {
+std::string selectDownstreamName(const std::string& path) {
     if (path == "/login" || path == "/login/password" ||
         path == "/login/email-code" || path == "/login/email" ||
         path == "/logout" || path == "/users/profile" ||
         path == "/users/avatar" || path == "/admin/users" ||
         path == "/admin/users/action") {
-        return &settings.user;
+        return "user_service";
     }
     if (path == "/videos/like" || path == "/videos/unlike" ||
         path == "/videos/like-status" || path == "/videos/favorite" ||
         path == "/videos/unfavorite" || path == "/videos/favorite-status" ||
         path == "/users/favorites" || path == "/videos/watch-progress" ||
         path == "/videos/comments" || path == "/videos/barrages") {
-        return &settings.video;
+        return "video_service";
     }
     if (path == "/files/upload" || path.rfind("/uploads/", 0) == 0) {
-        return &settings.file;
+        return "file_service";
     }
     if (path == "/transcode/jobs") {
-        return &settings.transcode;
+        return "transcode_service";
     }
     if (path == "/videos" || path == "/videos/detail" ||
         path == "/videos/search" || path == "/videos/play-url" ||
         path == "/videos/upload" || path == "/users/videos" ||
         path == "/admin/reviews" || path == "/admin/reviews/action" ||
         path == "/__smoke-cleanup") {
-        return &settings.video;
+        return "video_service";
     }
-    return nullptr;
+    return "";
 }
-
 std::string bearerToken(const httplib::Request& request) {
     if (!request.has_header("Authorization")) {
         return "";
@@ -226,7 +172,7 @@ bool verifyTokenIfNeeded(bitesession::RedisSessionManager& sessions,
 
 void logGatewayError(const std::string& requestId,
                      const std::string& route,
-                     const Downstream& downstream,
+                     const bitesvc::ServiceEndpoint& downstream,
                      const std::string& downstreamUrl,
                      const std::string& reason) {
     std::cerr << "request_id=" << requestId
@@ -237,13 +183,13 @@ void logGatewayError(const std::string& requestId,
 }
 
 void forwardToDownstream(const GatewaySettings& settings,
-                         const Downstream& downstream,
+                         const bitesvc::ServiceEndpoint& downstream,
                          const httplib::Request& request,
                          httplib::Response& response) {
     const std::string requestId = request.has_header("X-Request-Id")
         ? request.get_header_value("X-Request-Id") : makeRequestId();
     const std::string target = requestPathWithQuery(request);
-    const bitehttp::HttpClient client(downstream.baseUrl, settings.timeoutMs);
+    const bitehttp::HttpClient client(downstream.baseUrl, settings.discovery.timeoutMs);
 
     httplib::Headers headers = request.headers;
     headers.erase("Host");
@@ -302,12 +248,12 @@ int GatewayServerBuilder::start() const {
     GatewaySettings settings;
     std::string error;
     if (!loadGatewayPort(gatewayConfigPath_, settings, error) ||
-        !loadServices(servicesConfigPath_, settings, error)) {
+        !bitesvc::loadDiscoverySettings(servicesConfigPath_, settings.discovery, error)) {
         std::cerr << "api_gateway 启动失败: " << error << '\n';
         return 1;
     }
 
-    bitesession::RedisSessionManager sessions(settings.redis);
+    bitesession::RedisSessionManager sessions(settings.discovery.redis);
     if (!sessions.connect(error)) {
         std::cerr << "api_gateway Redis 连接失败: " << error << '\n';
         return 1;
@@ -334,12 +280,20 @@ int GatewayServerBuilder::start() const {
         if (!verifyTokenIfNeeded(sessions, request, response)) {
             return;
         }
-        const Downstream* downstream = selectDownstream(settings, request.path);
-        if (!downstream) {
+        const std::string downstreamName = selectDownstreamName(request.path);
+        if (downstreamName.empty()) {
             Json::Value body;
             body["success"] = false;
             body["message"] = "gateway route not found";
             setJsonResponse(response, 404, body);
+            return;
+        }
+        const auto* downstream = settings.discovery.registry.find(downstreamName);
+        if (!downstream) {
+            Json::Value body;
+            body["success"] = false;
+            body["message"] = "downstream service not registered";
+            setJsonResponse(response, 502, body);
             return;
         }
         forwardToDownstream(settings, *downstream, request, response);

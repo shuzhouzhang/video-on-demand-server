@@ -5,6 +5,7 @@ add_executable(api_gateway
     source/svc_rpc.cc
     ../common/http_client.cc
     ../common/config.cc
+    ../common/service_registry.cc
     ../common/redis_session_manager.cc
     ../common/util.cc
     ../common/bitelog.cc

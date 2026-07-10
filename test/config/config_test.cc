@@ -1,5 +1,6 @@
 #include "../../source/config.h"
 #include "../../source/util.h"
+#include "../../server/common/service_registry.h"
 
 #include <cstdio>
 #include <iostream>
@@ -89,6 +90,36 @@ int main() {
                      error.find("server.port") != std::string::npos,
                  "reject out-of-range port");
 
+
+
+    const std::string servicesFilename = "/tmp/video_services_config_test.json";
+    const std::string servicesConfig = R"({
+        "user_service": "http://127.0.0.1:10002",
+        "video_service": "http://127.0.0.1:10003",
+        "file_service": "http://127.0.0.1:10001",
+        "transcode_service": "http://127.0.0.1:10004",
+        "timeout_ms": 2500,
+        "redis": {"enabled": true, "host": "127.0.0.1", "port": 6379}
+    })";
+    ok &= expect(biteutil::FUTIL::write(servicesFilename, servicesConfig),
+                 "write service discovery fixture");
+    bitesvc::DiscoverySettings discovery;
+    ok &= expect(bitesvc::loadDiscoverySettings(servicesFilename, discovery, error),
+                 "load service discovery settings");
+    const auto* userService = discovery.registry.find("user_service");
+    ok &= expect(userService && userService->baseUrl == "http://127.0.0.1:10002",
+                 "find registered user service");
+    ok &= expect(discovery.timeoutMs == 2500 && discovery.redis.enabled,
+                 "load discovery timeout and redis settings");
+
+    const std::string invalidServices = R"({"user_service":"127.0.0.1:10002"})";
+    ok &= expect(biteutil::FUTIL::write(servicesFilename, invalidServices),
+                 "write invalid service discovery fixture");
+    ok &= expect(!bitesvc::loadDiscoverySettings(servicesFilename, discovery, error) &&
+                     !error.empty(),
+                 "reject invalid service discovery settings");
+
+    std::remove(servicesFilename.c_str());
     std::remove(filename.c_str());
     std::remove(logFilename.c_str());
     ok &= expect(!biteconfig::Config::load(filename, error) && !error.empty(),

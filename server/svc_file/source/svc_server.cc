@@ -1,5 +1,6 @@
 #include "svc_server.h"
 #include "svc_data.h"
+#include "svc_sync.h"
 
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
@@ -102,6 +103,9 @@ int FileServerBuilder::start() const {
     bitelog::bitelog_init(settings->log);
 
     httplib::Server server;
+    CacheDelete cacheDelete;
+    (void)cacheDelete;
+
     FileDataFacade data;
     registerRoutes(server, data);
 

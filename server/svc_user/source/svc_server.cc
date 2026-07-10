@@ -1,6 +1,7 @@
 #include "svc_server.h"
 #include "svc_data.h"
 #include "svc_rpc.h"
+#include "svc_sync.h"
 
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
@@ -42,6 +43,9 @@ int UserServerBuilder::start() const {
         ERR("user_service Redis connection failed: {}", error);
         return 1;
     }
+
+    CacheDelete cacheDelete;
+    (void)cacheDelete;
 
     UserDataFacade data(database);
     auto repository = data.createRepository();

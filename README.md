@@ -50,8 +50,9 @@ video_server
 - `user_service`：用户登录、邮箱验证码登录、退出登录、用户资料、头像资料更新、后台用户管理。
 - `video_service`：视频元数据、列表、详情、搜索、播放地址、点赞、收藏、评论、弹幕、观看进度、审核。
 - `file_service`：文件服务入口，提供 `/uploads/...` 下载和 `POST /files/upload` 通用文件上传；现有 `/videos/upload`、`/users/avatar` 为兼容 Qt 客户端仍保留原路径。
-- `transcode_service`：对齐参考项目新增的转码服务入口，当前提供健康检查和 `/transcode/jobs` 任务接收骨架，后续接入 HLS/FFmpeg/MQ。
-- `common`：JSON、日志、配置、HTTP Client、RedisSessionManager 等公共能力。
+- `transcode_service`：对齐参考项目新增的转码服务入口，提供健康检查、`/transcode/jobs` 任务接收和本地 `SvcWorker` 执行队列边界，后续可替换为 HLS/FFmpeg/MQ 实现。
+- `common`：JSON、日志、配置、HTTP Client、RedisSessionManager、CacheSync 同步接口等公共能力。
+- `data`：用户、视频、互动、审核、文件等跨服务领域模型。
 - `database`：MySQL 连接和迁移工具。
 
 ## 请求流程
@@ -166,6 +167,8 @@ curl http://127.0.0.1:10000/videos
 - Gateway 设计：统一入口、路由转发、错误响应、请求 ID、Redis token 校验。
 - HTTP 内部调用：第一阶段不引入复杂 RPC，通过 `common/HttpClient` 封装下游调用。
 - Repository 模式：服务入口已经按用户、视频、文件建立独立 Repository 边界。
+- 公共 data 层：将视频、用户、互动、审核、文件 DTO 从服务实现中拆出，降低服务间模型耦合。
+- svc_sync 边界：对齐参考项目的缓存删除/缓存回写结构，当前提供本地可运行实现，后续可接入 MQ/Redis 延迟同步。
 - Redis 会话管理：登录成功生成 token，Redis 保存会话，gateway 校验登录状态。
 - Docker 部署：`docker compose up --build` 启动服务、MySQL、Redis 和数据库迁移。
 
@@ -173,4 +176,4 @@ curl http://127.0.0.1:10000/videos
 
 - 第一阶段仍是共享 MySQL schema，未强行引入分布式事务。
 - `/videos/upload` 和 `/users/avatar` 为兼容现有 Qt 客户端仍保留旧路径；`file_service` 已承接 `/uploads/...` 下载和通用 `/files/upload`。
-- 未引入注册中心、消息队列、服务网格或复杂熔断组件，避免超出当前项目维护能力。
+- 未引入注册中心、真实消息队列、服务网格或复杂熔断组件，避免超出当前项目维护能力；相关边界已通过 `svc_sync`、`svc_mq`、`svc_worker` 预留。

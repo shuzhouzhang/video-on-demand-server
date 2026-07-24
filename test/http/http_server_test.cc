@@ -1,8 +1,11 @@
-#include "../../source/http_server.h"
-#include "../../source/util.h"
+#include "../../server/common/http_server.h"
+#include "../../server/common/redis_session_manager.h"
+#include "../../server/common/util.h"
 
 #include <filesystem>
+#include <cstdlib>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -18,7 +21,10 @@ bool expect(bool condition, const std::string& message) {
     return true;
 }
 
-class FakeVideoStore : public bitevideo::VideoStore {
+class FakeRepositories : public biterepo::IUserRepository,
+                         public biterepo::IVideoRepository,
+                         public biterepo::IInteractionRepository,
+                         public biterepo::IAdminRepository {
 public:
     bool list(std::vector<bitevideo::Video>& videos,
               std::string& error) override {
@@ -38,6 +44,7 @@ public:
             videoId, draft.title, draft.userName, "6-25", 0,
             "0", "0", draft.category, draft.tags, draft.description};
         createdVideos_[videoId] = createdVideo_;
+        createdOwners_[videoId] = draft.account;
         createdPlayUrls_[videoId] = draft.playUrl.empty() ? draft.videoFileName :
             draft.playUrl;
         video = createdVideo_;
@@ -47,6 +54,18 @@ public:
     bool findById(const std::string& videoId,
                   std::optional<bitevideo::Video>& video,
                   std::string& error) override {
+        error.clear();
+        if (videoId == "video-001") {
+            video = baseVideo_;
+        } else {
+            video.reset();
+        }
+        return true;
+    }
+
+    bool findAnyById(const std::string& videoId,
+                     std::optional<bitevideo::Video>& video,
+                     std::string& error) override {
         error.clear();
         if (videoId == "video-001") {
             video = baseVideo_;
@@ -75,8 +94,6 @@ public:
         error.clear();
         if (videoId == "video-001") {
             url = "D:/video-on-demand-client/test.mp4";
-        } else if (createdPlayUrls_.count(videoId) > 0) {
-            url = createdPlayUrls_.at(videoId);
         } else {
             url.reset();
         }
@@ -185,6 +202,11 @@ public:
         videos.clear();
         if (account == "bit-user-001") {
             list(videos, error);
+            for (const auto& [videoId, owner] : createdOwners_) {
+                if (owner == account) {
+                    videos.push_back(createdVideos_.at(videoId));
+                }
+            }
         }
         return true;
     }
@@ -260,6 +282,31 @@ public:
         return true;
     }
 
+    bool interactionUserProfile(
+        const std::string& account,
+        std::optional<bitevideo::UserProfile>& profile,
+        std::string& error) override {
+        return userProfile(account, profile, error);
+    }
+
+    bool userAccess(const std::string& account,
+                    std::optional<bitevideo::UserAccess>& access,
+                    std::string& error) override {
+        error.clear();
+        access.reset();
+        if (account == "disabled-admin@bit.com") {
+            access = bitevideo::UserAccess{"管理员", "禁用"};
+            return true;
+        }
+        for (const auto& user : users_) {
+            if (user.account == account) {
+                access = bitevideo::UserAccess{user.role, user.status};
+                break;
+            }
+        }
+        return true;
+    }
+
     bool updateUserProfile(const std::string& account,
                            const std::string& userName,
                            const std::string& description,
@@ -311,7 +358,10 @@ public:
             session = {};
             error = "邮箱格式错误";
         } else {
+            std::lock_guard<std::mutex> lock(emailMutex_);
             email_ = email;
+            emailCodeConsumed_ = false;
+            emailFailedAttempts_ = 0;
             session = bitevideo::EmailCodeSession{"email-code-001", "246810"};
         }
         return true;
@@ -323,11 +373,18 @@ public:
                     std::optional<bitevideo::UserProfile>& profile,
                     std::string& error) override {
         error.clear();
+        std::lock_guard<std::mutex> lock(emailMutex_);
         if (email != email_ || authcodeId != "email-code-001" ||
-            authcode != "246810") {
+            emailCodeConsumed_ || emailFailedAttempts_ >= 5) {
             profile.reset();
             return true;
         }
+        if (authcode != "246810") {
+            ++emailFailedAttempts_;
+            profile.reset();
+            return true;
+        }
+        emailCodeConsumed_ = true;
         profile = bitevideo::UserProfile{email, "email-user", "", ""};
         return true;
     }
@@ -417,6 +474,7 @@ private:
     int nextCreatedVideoIndex_ = 3;
     std::unordered_map<std::string, bitevideo::Video> createdVideos_;
     std::unordered_map<std::string, std::string> createdPlayUrls_;
+    std::unordered_map<std::string, std::string> createdOwners_;
     bool liked_ = false;
     int likeCount_ = 256;
     int watchSeconds_ = 0;
@@ -426,6 +484,9 @@ private:
     bitevideo::UserProfile user_{
         "bit-user-001", "BIT 用户", "真实后端用户资料", ""};
     std::string email_;
+    std::mutex emailMutex_;
+    bool emailCodeConsumed_ = false;
+    int emailFailedAttempts_ = 0;
     bitevideo::AdminReview review_{
         "video-001", "测试视频", "bit-user-001", "待审核",
         "2026-06-25 12:00"};
@@ -441,8 +502,10 @@ private:
 int main() {
     bool ok = true;
     std::filesystem::remove_all("uploads");
-    FakeVideoStore videoStore;
-    biteserver::HttpServer server(videoStore);
+    FakeRepositories videoStore;
+    const biterepo::RepositorySet allRepositories{
+        &videoStore, &videoStore, &videoStore, &videoStore};
+    biteserver::HttpServer server(allRepositories);
     const int port = server.bindToAnyPort("127.0.0.1");
     ok &= expect(port > 0, "bind an available local port");
     if (port <= 0) {
@@ -497,9 +560,30 @@ int main() {
         const auto body = biteutil::JSON::unserialize(emailCode->body);
         ok &= expect(body && (*body)["success"].asBool() &&
                          (*body)["authcodeId"].asString() == "email-code-001" &&
-                         (*body)["debugCode"].asString() == "246810",
-                     "POST /login/email-code creates a code session");
+                         !body->isMember("debugCode"),
+                     "POST /login/email-code hides debug code by default");
     }
+
+#if defined(_WIN32)
+    _putenv_s("VIDEO_ENABLE_EMAIL_DEBUG_CODE", "1");
+#else
+    setenv("VIDEO_ENABLE_EMAIL_DEBUG_CODE", "1", 1);
+#endif
+    const auto developmentEmailCode = client.Post(
+        "/login/email-code", R"({"email":"email-user@example.com"})",
+        "application/json");
+    if (developmentEmailCode) {
+        const auto body =
+            biteutil::JSON::unserialize(developmentEmailCode->body);
+        ok &= expect(body && (*body)["success"].asBool() &&
+                         (*body)["debugCode"].asString() == "246810",
+                     "POST /login/email-code exposes debug code only by opt-in");
+    }
+#if defined(_WIN32)
+    _putenv_s("VIDEO_ENABLE_EMAIL_DEBUG_CODE", "");
+#else
+    unsetenv("VIDEO_ENABLE_EMAIL_DEBUG_CODE");
+#endif
 
     const auto emailLogin = client.Post(
         "/login/email",
@@ -512,6 +596,16 @@ int main() {
                      "POST /login/email accepts a valid code");
     }
 
+    const auto repeatedEmailLogin = client.Post(
+        "/login/email",
+        R"({"email":"email-user@example.com","authcodeId":"email-code-001","authcode":"246810"})",
+        "application/json");
+    if (repeatedEmailLogin) {
+        const auto body = biteutil::JSON::unserialize(repeatedEmailLogin->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /login/email consumes a code only once");
+    }
+
     const auto badEmailLogin = client.Post(
         "/login/email",
         R"({"email":"email-user@example.com","authcodeId":"email-code-001","authcode":"000000"})",
@@ -520,6 +614,26 @@ int main() {
         const auto body = biteutil::JSON::unserialize(badEmailLogin->body);
         ok &= expect(body && !(*body)["success"].asBool(),
                      "POST /login/email rejects an invalid code");
+    }
+
+    const auto limitedCode = client.Post(
+        "/login/email-code", R"({"email":"limited@example.com"})",
+        "application/json");
+    (void)limitedCode;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        client.Post(
+            "/login/email",
+            R"({"email":"limited@example.com","authcodeId":"email-code-001","authcode":"000000"})",
+            "application/json");
+    }
+    const auto afterAttemptLimit = client.Post(
+        "/login/email",
+        R"({"email":"limited@example.com","authcodeId":"email-code-001","authcode":"246810"})",
+        "application/json");
+    if (afterAttemptLimit) {
+        const auto body = biteutil::JSON::unserialize(afterAttemptLimit->body);
+        ok &= expect(body && !(*body)["success"].asBool(),
+                     "POST /login/email enforces the failed-attempt limit");
     }
 
     const auto logout = client.Post(
@@ -631,9 +745,8 @@ int main() {
         if (uploadedPlayUrl) {
             const auto body = biteutil::JSON::unserialize(
                 uploadedPlayUrl->body);
-            ok &= expect(body && (*body)["success"].asBool() &&
-                             (*body)["playUrl"].asString() == "/" + uploadedPath,
-                         "GET /videos/play-url returns uploaded storage path");
+            ok &= expect(body && !(*body)["success"].asBool(),
+                         "pending upload has no public play URL");
         }
     }
 
@@ -903,7 +1016,7 @@ int main() {
         const auto body = biteutil::JSON::unserialize(myVideos->body);
         ok &= expect(body && (*body)["success"].asBool() &&
                          (*body)["videos"].isArray() &&
-                         (*body)["videos"].size() == 1 &&
+                         (*body)["videos"].size() >= 1 &&
                          (*body)["videos"][0]["id"].asString() == "video-001",
                      "GET /users/videos returns owner videos");
     }
@@ -1161,6 +1274,169 @@ int main() {
 
     server.stop();
     serverThread.join();
+
+    FakeRepositories strictStore;
+    bitesession::RedisSessionManager strictSessions;
+    const biterepo::RepositorySet strictRepositories{
+        &strictStore, &strictStore, &strictStore, &strictStore};
+    biteserver::HttpServer strictServer(
+        strictRepositories, biteserver::ServiceRole::All, "strict_test",
+        &strictSessions, true);
+    const int strictPort = strictServer.bindToAnyPort("127.0.0.1");
+    ok &= expect(strictPort > 0, "bind strict-auth test server");
+    if (strictPort > 0) {
+        std::thread strictThread(
+            [&strictServer]() { strictServer.listenAfterBind(); });
+        httplib::Client strictClient("127.0.0.1", strictPort);
+        const auto identityHeaders = [](const std::string& account) {
+            return httplib::Headers{
+                {"X-Authenticated-Account", account},
+                {"X-Gateway-Verified", "1"},
+                {"Authorization", "Bearer vod-test-token"},
+            };
+        };
+        const auto userHeaders = identityHeaders("bit-user-001");
+        const auto adminHeaders = identityHeaders("admin@bit.com");
+        const auto disabledAdminHeaders =
+            identityHeaders("disabled-admin@bit.com");
+
+        const auto likeAsOther = strictClient.Post(
+            "/videos/like", userHeaders,
+            R"({"videoId":"video-001","account":"other-user"})",
+            "application/json");
+        ok &= expect(likeAsOther && likeAsOther->status == 403,
+                     "user A cannot like with user B in the body");
+        const auto profileAsOther = strictClient.Post(
+            "/users/profile", userHeaders,
+            R"({"account":"other-user","userName":"越权","description":""})",
+            "application/json");
+        ok &= expect(profileAsOther && profileAsOther->status == 403,
+                     "user A cannot update user B profile");
+
+        httplib::MultipartFormDataItems otherAvatar = {
+            {"account", "other-user", "", "text/plain"},
+            {"avatarFile", "fake-png", "avatar.png", "image/png"}};
+        const auto avatarAsOther = strictClient.Post(
+            "/users/avatar", userHeaders, otherAvatar);
+        ok &= expect(avatarAsOther && avatarAsOther->status == 403,
+                     "user A cannot upload user B avatar");
+
+        httplib::MultipartFormDataItems otherUpload = {
+            {"metadata",
+             R"({"title":"越权上传","account":"other-user","category":"科技"})",
+             "", "application/json"},
+            {"videoFile", "fake-mp4", "other.mp4", "video/mp4"}};
+        const auto uploadAsOther = strictClient.Post(
+            "/videos/upload", userHeaders, otherUpload);
+        ok &= expect(uploadAsOther && uploadAsOther->status == 403,
+                     "user A cannot upload a video as user B");
+
+        const auto normalAdmin = strictClient.Get(
+            "/admin/reviews", userHeaders);
+        const auto allowedAdmin = strictClient.Get(
+            "/admin/reviews", adminHeaders);
+        const auto disabledAdmin = strictClient.Get(
+            "/admin/reviews", disabledAdminHeaders);
+        const auto missingIdentity = strictClient.Get("/admin/reviews");
+        ok &= expect(normalAdmin && normalAdmin->status == 403,
+                     "ordinary user cannot access admin reviews");
+        ok &= expect(allowedAdmin && allowedAdmin->status == 200,
+                     "enabled administrator can access admin reviews");
+        ok &= expect(disabledAdmin && disabledAdmin->status == 403,
+                     "disabled administrator cannot access admin reviews");
+        ok &= expect(missingIdentity && missingIdentity->status == 401,
+                     "direct protected call without gateway identity is rejected");
+
+        const auto logoutOnce = strictClient.Post(
+            "/logout", userHeaders, R"({"account":"bit-user-001"})",
+            "application/json");
+        const auto logoutTwice = strictClient.Post(
+            "/logout", userHeaders, R"({"account":"bit-user-001"})",
+            "application/json");
+        ok &= expect(logoutOnce && logoutOnce->status == 200 &&
+                         logoutTwice && logoutTwice->status == 200,
+                     "repeated logout remains successful");
+
+        httplib::MultipartFormDataItems pendingUpload = {
+            {"metadata",
+             R"({"title":"待审核安全测试","account":"bit-user-001","userName":"伪造昵称","category":"科技","videoFileName":"pending.mp4"})",
+             "", "application/json"},
+            {"videoFile", "fake-mp4", "pending.mp4", "video/mp4"}};
+        const auto created = strictClient.Post(
+            "/videos/upload", userHeaders, pendingUpload);
+        std::string pendingId;
+        if (created) {
+            const auto body = biteutil::JSON::unserialize(created->body);
+            pendingId = body ? (*body)["video"]["id"].asString() : "";
+            ok &= expect(created->status == 200 && body &&
+                             (*body)["success"].asBool() && !pendingId.empty(),
+                         "createVideo returns its pending video");
+        }
+        if (!pendingId.empty()) {
+            const auto publicList = strictClient.Get("/videos");
+            const auto detail = strictClient.Get(
+                ("/videos/detail?id=" + pendingId).c_str());
+            const auto playUrl = strictClient.Get(
+                ("/videos/play-url?videoId=" + pendingId).c_str());
+            const std::string interactionBody = "{\"videoId\":\"" +
+                pendingId + "\",\"account\":\"bit-user-001\"}";
+            const auto likePending = strictClient.Post(
+                "/videos/like", userHeaders, interactionBody,
+                "application/json");
+            const auto favoritePending = strictClient.Post(
+                "/videos/favorite", userHeaders, interactionBody,
+                "application/json");
+            const auto commentPending = strictClient.Post(
+                "/videos/comments", userHeaders,
+                ("{\"videoId\":\"" + pendingId +
+                 "\",\"account\":\"bit-user-001\","
+                 "\"userName\":\"伪造昵称\",\"content\":\"test\"}"),
+                "application/json");
+            const auto ownerVideos = strictClient.Get(
+                "/users/videos?account=bit-user-001", userHeaders);
+
+            const auto listBody = publicList
+                ? biteutil::JSON::unserialize(publicList->body) : std::nullopt;
+            const auto detailBody = detail
+                ? biteutil::JSON::unserialize(detail->body) : std::nullopt;
+            const auto playBody = playUrl
+                ? biteutil::JSON::unserialize(playUrl->body) : std::nullopt;
+            const auto likeBody = likePending
+                ? biteutil::JSON::unserialize(likePending->body) : std::nullopt;
+            const auto favoriteBody = favoritePending
+                ? biteutil::JSON::unserialize(favoritePending->body) : std::nullopt;
+            const auto commentBody = commentPending
+                ? biteutil::JSON::unserialize(commentPending->body) : std::nullopt;
+            const auto ownerBody = ownerVideos
+                ? biteutil::JSON::unserialize(ownerVideos->body) : std::nullopt;
+
+            bool absentFromList = listBody && listBody->isArray();
+            if (absentFromList) {
+                for (const auto& item : *listBody) {
+                    absentFromList &= item["id"].asString() != pendingId;
+                }
+            }
+            bool presentForOwner = false;
+            if (ownerBody && (*ownerBody)["videos"].isArray()) {
+                for (const auto& item : (*ownerBody)["videos"]) {
+                    presentForOwner |= item["id"].asString() == pendingId;
+                }
+            }
+            ok &= expect(absentFromList,
+                         "pending video is absent from public list");
+            ok &= expect(detailBody && !(*detailBody)["success"].asBool() &&
+                             playBody && !(*playBody)["success"].asBool(),
+                         "pending video has no public detail or play URL");
+            ok &= expect(likeBody && !(*likeBody)["success"].asBool() &&
+                             favoriteBody && !(*favoriteBody)["success"].asBool() &&
+                             commentBody && !(*commentBody)["success"].asBool(),
+                         "pending video rejects interactions");
+            ok &= expect(presentForOwner,
+                         "owner can see own pending video in /users/videos");
+        }
+        strictServer.stop();
+        strictThread.join();
+    }
     std::filesystem::remove_all("uploads");
     return ok ? 0 : 1;
 }

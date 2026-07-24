@@ -1,5 +1,6 @@
 #include "redis_session_manager.h"
 
+#include "auth.h"
 #include "util.h"
 
 #include <hiredis/hiredis.h>
@@ -82,7 +83,7 @@ bool RedisSessionManager::createToken(const std::string& account,
     }
 
     token = "vod-" + biteutil::Random::code(32, biteutil::UuidType::MIX);
-    const std::string key = keyForToken(token);
+    const std::string key = biteauth::redisSessionKeyForToken(token);
     redisReply* reply = static_cast<redisReply*>(
         redisCommand(context_, "SETEX %s %d %s", key.c_str(),
                      settings_.sessionTtlSeconds, account.c_str()));
@@ -109,7 +110,7 @@ std::optional<std::string> RedisSessionManager::accountForToken(
         return std::nullopt;
     }
 
-    const std::string key = keyForToken(token);
+    const std::string key = biteauth::redisSessionKeyForToken(token);
     redisReply* reply = static_cast<redisReply*>(
         redisCommand(context_, "GET %s", key.c_str()));
     if (!reply) {
@@ -137,7 +138,7 @@ bool RedisSessionManager::deleteToken(const std::string& token,
         return true;
     }
 
-    const std::string key = keyForToken(token);
+    const std::string key = biteauth::redisSessionKeyForToken(token);
     redisReply* reply = static_cast<redisReply*>(
         redisCommand(context_, "DEL %s", key.c_str()));
     if (!reply || reply->type == REDIS_REPLY_ERROR) {
@@ -149,10 +150,6 @@ bool RedisSessionManager::deleteToken(const std::string& token,
     }
     freeReplyObject(reply);
     return true;
-}
-
-std::string RedisSessionManager::keyForToken(const std::string& token) const {
-    return "vod:session:" + token;
 }
 
 }  // namespace bitesession

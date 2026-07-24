@@ -109,6 +109,82 @@ std::optional<AppSettings> Config::load(const std::string& filename,
         }
     }
 
+    AuthSettings authSettings;
+    const Json::Value& auth = (*root)["auth"];
+    if (!auth.isNull()) {
+        if (!auth.isObject()) {
+            error = "auth must be an object";
+            return std::nullopt;
+        }
+        if (!auth["enforce_gateway_identity"].isNull() &&
+            !auth["enforce_gateway_identity"].isBool()) {
+            error = "auth.enforce_gateway_identity must be a boolean";
+            return std::nullopt;
+        }
+        if (auth["enforce_gateway_identity"].isBool()) {
+            authSettings.enforceGatewayIdentity =
+                auth["enforce_gateway_identity"].asBool();
+        }
+    }
+
+    TranscodeSettings transcodeSettings;
+    const Json::Value& transcode = (*root)["transcode"];
+    if (!transcode.isNull()) {
+        if (!transcode.isObject()) {
+            error = "transcode must be an object";
+            return std::nullopt;
+        }
+        const auto readPositiveInt = [&](const char* key, int& destination,
+                                         int maximum) {
+            const Json::Value& value = transcode[key];
+            if (value.isNull()) return true;
+            if (!value.isInt() || value.asInt() < 1 ||
+                value.asInt() > maximum) {
+                error = std::string("transcode.") + key +
+                    " must be a positive integer";
+                return false;
+            }
+            destination = value.asInt();
+            return true;
+        };
+        if (!transcode["enabled"].isNull()) {
+            if (!transcode["enabled"].isBool()) {
+                error = "transcode.enabled must be a boolean";
+                return std::nullopt;
+            }
+            transcodeSettings.enabled = transcode["enabled"].asBool();
+        }
+        if (!readPositiveInt("worker_threads",
+                             transcodeSettings.workerThreads, 32) ||
+            !readPositiveInt("poll_interval_ms",
+                             transcodeSettings.pollIntervalMs, 60000) ||
+            !readPositiveInt("lease_seconds",
+                             transcodeSettings.leaseSeconds, 86400) ||
+            !readPositiveInt("max_attempts",
+                             transcodeSettings.maxAttempts, 20) ||
+            !readPositiveInt("retry_delay_seconds",
+                             transcodeSettings.retryDelaySeconds, 86400)) {
+            return std::nullopt;
+        }
+        const auto readNonEmptyString = [&](const char* key,
+                                            std::string& destination) {
+            const Json::Value& value = transcode[key];
+            if (value.isNull()) return true;
+            if (!value.isString() || value.asString().empty()) {
+                error = std::string("transcode.") + key +
+                    " must be a non-empty string";
+                return false;
+            }
+            destination = value.asString();
+            return true;
+        };
+        if (!readNonEmptyString("ffmpeg_path", transcodeSettings.ffmpegPath) ||
+            !readNonEmptyString("upload_root", transcodeSettings.uploadRoot) ||
+            !readNonEmptyString("output_root", transcodeSettings.outputRoot)) {
+            return std::nullopt;
+        }
+    }
+
     AppSettings settings{
         {static_cast<std::uint16_t>(port.asInt())},
         {log["async"].asBool(), log["level"].asInt(),
@@ -117,7 +193,9 @@ std::optional<AppSettings> Config::load(const std::string& filename,
          static_cast<std::uint16_t>(database["port"].asInt()),
          database["user"].asString(), database["password"].asString(),
          database["name"].asString()},
-        redisSettings};
+        redisSettings,
+        authSettings,
+        transcodeSettings};
     return settings;
 }
 

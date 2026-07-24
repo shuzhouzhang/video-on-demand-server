@@ -1,6 +1,8 @@
 #include "config.h"
 #include "http_server.h"
 #include "../database/database.h"
+#include "../repository/admin_repository.h"
+#include "../svc_user/source/user_repository.h"
 #include "../svc_video/source/video_repository.h"
 
 #include <iostream>
@@ -26,7 +28,11 @@ int main(int argc, char* argv[]) {
     INF("HTTP server listening on 0.0.0.0:{}", settings->server.port);
 
     bitevideo::MySqlVideoRepository videos(database);
-    biteserver::HttpServer server(videos);
+    biteuser::MySqlUserRepository users(database);
+    biterepo::MySqlAdminRepository admins(database);
+    const biterepo::RepositorySet repositories{
+        &users, &videos, &videos, &admins};
+    biteserver::HttpServer server(repositories);
     if (!server.listen("0.0.0.0", settings->server.port)) {
         ERR("HTTP server failed to listen on port {}", settings->server.port);
         return 1;

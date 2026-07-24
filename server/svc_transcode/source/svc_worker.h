@@ -1,37 +1,60 @@
 #pragma once
 
-#include <condition_variable>
-#include <cstddef>
+#include "svc_data.h"
+#include "../../common/config.h"
+
+#include <atomic>
 #include <functional>
-#include <mutex>
-#include <queue>
 #include <string>
 #include <thread>
 #include <vector>
 
 namespace svc_transcode {
 
+using LeaseHeartbeat = std::function<bool(std::string& error)>;
+
+class ITranscodeRunner {
+public:
+    virtual ~ITranscodeRunner() = default;
+    virtual bool run(const TranscodeJob& job,
+                     const LeaseHeartbeat& heartbeat,
+                     std::string& error) = 0;
+};
+
+class FfmpegRunner final : public ITranscodeRunner {
+public:
+    explicit FfmpegRunner(biteconfig::TranscodeSettings settings);
+    bool run(const TranscodeJob& job,
+             const LeaseHeartbeat& heartbeat,
+             std::string& error) override;
+
+private:
+    biteconfig::TranscodeSettings settings_;
+};
+
 class SvcWorker {
 public:
-    using Task = std::function<void()>;
-
-    explicit SvcWorker(std::size_t threadCount = 1);
+    SvcWorker(ITranscodeRepository& repository,
+              ITranscodeRunner& runner,
+              biteconfig::TranscodeSettings settings);
     ~SvcWorker();
 
     SvcWorker(const SvcWorker&) = delete;
     SvcWorker& operator=(const SvcWorker&) = delete;
 
-    bool addTask(Task task, std::string& error);
+    void start();
     void stop();
-    std::size_t pendingTasks() const;
+    bool processOne(bool& processed, std::string& error);
 
 private:
     void threadEntry();
+    std::string makeLeaseToken();
 
-    mutable std::mutex mutex_;
-    std::condition_variable cv_;
-    bool stopped_ = false;
-    std::queue<Task> tasks_;
+    ITranscodeRepository& repository_;
+    ITranscodeRunner& runner_;
+    biteconfig::TranscodeSettings settings_;
+    std::atomic<bool> stopped_{true};
+    std::atomic<unsigned long long> leaseCounter_{0};
     std::vector<std::thread> threads_;
 };
 

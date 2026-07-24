@@ -147,6 +147,81 @@ bool Database::escape(const std::string& input,
     }
 }
 
+bool Database::executeAffected(const std::string& sql,
+                               unsigned long long& affectedRows,
+                               std::string& error) {
+    affectedRows = 0;
+    error.clear();
+    if (!database_) {
+        error = "MySQL 尚未连接";
+        return false;
+    }
+
+    try {
+        auto connection = database_->connection();
+        MYSQL* handle = connection->handle();
+        if (mysql_real_query(handle, sql.data(), sql.size()) != 0) {
+            error = "MySQL 执行失败: " + std::string(mysql_error(handle));
+            return false;
+        }
+        const my_ulonglong affected = mysql_affected_rows(handle);
+        if (affected == static_cast<my_ulonglong>(-1)) {
+            error = "MySQL 无法读取受影响行数: " +
+                std::string(mysql_error(handle));
+            return false;
+        }
+        affectedRows = static_cast<unsigned long long>(affected);
+        return true;
+    } catch (const odb::exception& exception) {
+        error = "MySQL 执行失败: " + std::string(exception.what());
+        return false;
+    }
+}
+
+bool Database::executeTransaction(const std::vector<std::string>& statements,
+                                  std::string& error) {
+    error.clear();
+    if (!database_) {
+        error = "MySQL 尚未连接";
+        return false;
+    }
+    if (statements.empty()) return true;
+
+    try {
+        auto connection = database_->connection();
+        MYSQL* handle = connection->handle();
+        if (mysql_autocommit(handle, false) != 0) {
+            error = "MySQL 开启事务失败: " + std::string(mysql_error(handle));
+            return false;
+        }
+        for (const auto& statement : statements) {
+            if (mysql_real_query(handle, statement.data(), statement.size()) != 0) {
+                error = "MySQL 事务执行失败: " +
+                    std::string(mysql_error(handle));
+                mysql_rollback(handle);
+                mysql_autocommit(handle, true);
+                return false;
+            }
+        }
+        if (mysql_commit(handle) != 0) {
+            error = "MySQL 提交事务失败: " +
+                std::string(mysql_error(handle));
+            mysql_rollback(handle);
+            mysql_autocommit(handle, true);
+            return false;
+        }
+        if (mysql_autocommit(handle, true) != 0) {
+            error = "MySQL 恢复自动提交失败: " +
+                std::string(mysql_error(handle));
+            return false;
+        }
+        return true;
+    } catch (const odb::exception& exception) {
+        error = "MySQL 事务执行失败: " + std::string(exception.what());
+        return false;
+    }
+}
+
 bool Database::executeIfChanged(const std::string& changeSql,
                                 const std::string& followupSql,
                                 bool& changed,

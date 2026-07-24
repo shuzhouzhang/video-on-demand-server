@@ -7,6 +7,7 @@
 #include "../../common/config.h"
 #include "../../common/redis_session_manager.h"
 #include "../../database/database.h"
+#include "../../repository/admin_repository.h"
 
 #include <iostream>
 #include <memory>
@@ -50,7 +51,8 @@ int VideoServerBuilder::start() const {
 
     VideoDataFacade data(database);
     auto repository = data.createRepository();
-    VideoRpcService rpc(*repository,
+    biterepo::MySqlAdminRepository adminRepository(database);
+    VideoRpcService rpc(*repository, *repository, adminRepository,
                    sessionManager.enabled() ? &sessionManager : nullptr);
     return rpc.listen("0.0.0.0", settings->server.port);
 }

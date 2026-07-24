@@ -17,5 +17,19 @@
   },
   "redis": {
     "enabled": false
+  },
+  "auth": {
+    "enforce_gateway_identity": false
+  },
+  "transcode": {
+    "enabled": true,
+    "worker_threads": 1,
+    "poll_interval_ms": 500,
+    "lease_seconds": 300,
+    "max_attempts": 3,
+    "retry_delay_seconds": 30,
+    "ffmpeg_path": "ffmpeg",
+    "upload_root": "uploads",
+    "output_root": "uploads/transcoded"
   }
 }

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../database/database.h"
-#include "../../svc_video/source/video_repository.h"
+#include "../../repository/repository.h"
 
 #include <memory>
 
@@ -11,7 +11,7 @@ class UserDataFacade {
 public:
     explicit UserDataFacade(bitedb::Database& database);
 
-    std::unique_ptr<bitevideo::VideoStore> createRepository() const;
+    std::unique_ptr<biterepo::IUserRepository> createRepository() const;
 
 private:
     bitedb::Database& database_;

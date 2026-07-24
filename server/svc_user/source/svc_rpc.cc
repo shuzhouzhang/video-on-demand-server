@@ -4,12 +4,19 @@
 
 namespace svc_user {
 
-UserRpcService::UserRpcService(bitevideo::VideoStore& repository,
-             bitesession::RedisSessionManager* sessions)
-    : repository_(repository), sessions_(sessions) {}
+UserRpcService::UserRpcService(
+    biterepo::IUserRepository& userRepository,
+    biterepo::IAdminRepository& adminRepository,
+    bitesession::RedisSessionManager* sessions)
+    : userRepository_(userRepository),
+      adminRepository_(adminRepository),
+      sessions_(sessions) {}
 
 int UserRpcService::listen(const std::string& host, std::uint16_t port) {
-    biteserver::HttpServer server(repository_,
+    biterepo::RepositorySet repositories;
+    repositories.users = &userRepository_;
+    repositories.admins = &adminRepository_;
+    biteserver::HttpServer server(repositories,
                                   biteserver::ServiceRole::User,
                                   "user_service",
                                   sessions_);

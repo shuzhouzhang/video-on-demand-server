@@ -40,6 +40,13 @@ public:
     bool escape(const std::string& input,
                 std::string& escaped,
                 std::string& error);
+    // Execute a mutation and report mysql_affected_rows. This is used for
+    // atomic compare-and-set style operations such as one-time code consume.
+    bool executeAffected(const std::string& sql,
+                         unsigned long long& affectedRows,
+                         std::string& error);
+    bool executeTransaction(const std::vector<std::string>& statements,
+                            std::string& error);
     // 在同一事务中执行变更；只有首条语句真正改变数据时才执行后续语句。
     bool executeIfChanged(const std::string& changeSql,
                           const std::string& followupSql,

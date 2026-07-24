@@ -3,7 +3,7 @@
  */
 #pragma once
 
-#include "../svc_video/source/video_repository.h"
+#include "../repository/repository.h"
 
 #include <cstdint>
 #include <memory>
@@ -27,12 +27,16 @@ enum class ServiceRole {
 
 class HttpServer {
 public:
-    explicit HttpServer(bitevideo::VideoStore& videoStore);
-    HttpServer(bitevideo::VideoStore& videoStore, ServiceRole role,
+    explicit HttpServer(biterepo::RepositorySet repositories);
+    HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
                std::string serviceName);
-    HttpServer(bitevideo::VideoStore& videoStore, ServiceRole role,
+    HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
                std::string serviceName,
                bitesession::RedisSessionManager* sessionManager);
+    HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
+               std::string serviceName,
+               bitesession::RedisSessionManager* sessionManager,
+               bool enforceGatewayIdentity);
 
     // 正式运行入口；成功监听后会阻塞，直到服务被停止。
     bool listen(const std::string& host, std::uint16_t port);
@@ -47,10 +51,11 @@ private:
     void registerHealthRoutes();
 
     httplib::Server server_;
-    bitevideo::VideoStore& videoStore_;
+    biterepo::RepositorySet repositories_;
     ServiceRole role_;
     std::string serviceName_;
     bitesession::RedisSessionManager* sessionManager_;
+    bool enforceGatewayIdentity_;
 };
 
 }  // namespace biteserver

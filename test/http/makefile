@@ -1,9 +1,10 @@
-http_server_test: http_server_test.cc ../../source/http_server.cc \
-	../../source/video.cc \
-	../../source/util.cc ../../source/bitelog.cc \
-	../../source/redis_session_manager.cc
+http_server_test: http_server_test.cc ../../server/common/http_server.cc \
+	../../server/common/auth.cc ../../server/data/video.cc \
+	../../server/common/email_verification.cc \
+	../../server/common/util.cc ../../server/common/bitelog.cc \
+	redis_session_manager_stub.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o $@ \
-		-ljsoncpp -lfmt -lspdlog -lcpp-httplib -lhiredis -pthread
+		-ljsoncpp -lfmt -lspdlog -lcpp-httplib -lcrypto -pthread
 
 .PHONY: test clean
 test: http_server_test

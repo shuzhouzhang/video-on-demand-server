@@ -50,7 +50,7 @@ video_server
 - `user_service`：用户登录、邮箱验证码登录、退出登录、用户资料、头像资料更新、后台用户管理。
 - `video_service`：视频元数据、列表、详情、搜索、播放地址、点赞、收藏、评论、弹幕、观看进度、审核。
 - `file_service`：文件服务入口，提供 `/uploads/...` 下载和 `POST /files/upload` 通用文件上传；现有 `/videos/upload`、`/users/avatar` 为兼容 Qt 客户端仍保留原路径。
-- `transcode_service`：对齐参考项目新增的转码服务入口，提供健康检查、`/transcode/jobs` 任务接收和本地 `SvcWorker` 执行队列边界，后续可替换为 HLS/FFmpeg/MQ 实现。
+- `transcode_service`：MySQL 持久化异步转码服务。视频上传与任务创建处于同一事务；worker 通过数据库租约原子领取任务，使用 FFmpeg 生成 H.264/AAC MP4，支持失败重试、进程重启恢复和状态查询，不依赖 MQ。
 - `common`：JSON、日志、配置、HTTP Client、ServiceRegistry、RedisSessionManager、CacheSync 同步接口等公共能力。
 - `data`：用户、视频、互动、审核、文件等跨服务领域模型。
 - `database`：MySQL 连接和迁移工具。
@@ -78,10 +78,59 @@ Qt Client
     |
 Authorization: Bearer <token>
     |
-gateway_service 校验 Redis token
+gateway_service 删除客户端伪造的内部身份头
     |
-转发到 user_service/video_service/file_service
+Redis token -> account
+    |
+注入 X-Authenticated-Account + X-Gateway-Verified: 1
+    |
+下游绑定认证 account；兼容字段缺省时补齐、相异时返回 403
 ```
+
+`Authorization` 和 `X-Request-Id` 继续转发。客户端传入的
+`X-Authenticated-Account`、`X-Authenticated-Role`、
+`X-Gateway-Verified` 会被 Gateway 无条件删除。
+
+## 安全运行模式
+
+- Redis/auth 开启时，受保护路由缺少或使用无效 Bearer token 返回 401，
+  Redis 查询异常返回 503。
+- 下游设置 `auth.enforce_gateway_identity=true` 后只信任 Gateway 身份；
+  绕过 Gateway 且缺少内部身份返回 401，客户端 account 不一致返回 403。
+- Docker 用户/视频服务默认启用严格身份绑定。`*.local.json` 中的 false
+  仅用于没有 Redis 的本地演示和旧 Qt 请求兼容，不是生产安全配置。
+- 管理接口在严格模式查询 `users.role/status`，只允许状态为“启用”的
+  “管理员”或“超级管理员”，不读取客户端 role。
+- 公开视频统一要求 `status=1 AND review_status='审核通过' AND transcode_status='READY'`。新上传的
+  待审核视频仍返回创建结果，并可由本人通过 `/users/videos` 查看。
+
+### 密码存储
+
+- 新密码使用 OpenSSL PBKDF2-HMAC-SHA256，当前迭代次数为 210000，
+  每次生成独立的 16 字节 CSPRNG salt。
+- 数据库存储格式为
+  `$pbkdf2-sha256$v=1$i=<iterations>$<salt-hex>$<digest-hex>`，便于后续升级
+  参数或算法。
+- 登录查询只按 account 读取密码摘要，不再在 SQL 中比较明文密码。
+- 历史明文账号仅作为迁移兼容：首次正确登录后通过条件 UPDATE 自动
+  换成版本化摘要；密码和完整摘要都不会写入日志。
+
+迁移前需执行：
+
+```bash
+make migrate
+./database_migrate conf/server.local.json \
+  migrations/013_harden_credentials_and_email_codes.sql
+```
+
+### 邮箱验证码
+
+- 使用 OpenSSL CSPRNG 生成 6 位数字验证码和不可预测的 authcodeId。
+- 验证码有效期 10 分钟、最多失败 5 次、同一邮箱 60 秒内只允许发送一次。
+- 正确验证通过带 `consumed=0`、有效期和尝试次数条件的原子 UPDATE 消费；
+  只有一个并发请求能得到受影响行数 1。
+- 默认响应不含 `debugCode`。只有开发者显式设置
+  `VIDEO_ENABLE_EMAIL_DEBUG_CODE=1` 时才返回；生产环境不得设置该变量。
 
 文件访问：
 
@@ -97,12 +146,23 @@ uploads 共享目录
 
 ## 数据库设计
 
-当前第一阶段仍使用同一 MySQL schema，代码层已经按服务拆出 Repository 边界，后续可以继续演进为物理拆库。
+当前仍使用同一 MySQL schema，但数据访问已经拆成四个领域接口：
+
+- `IUserRepository`：登录、验证码、资料和头像。
+- `IVideoRepository`：公开视频、上传、详情、搜索和作者作品。
+- `IInteractionRepository`：点赞、收藏、进度、评论和弹幕。
+- `IAdminRepository`：管理员授权、审核和后台用户操作。
+
+`MySqlUserRepository` 直接实现 `IUserRepository`，不再继承
+`MySqlVideoRepository`。`user_service` 不链接视频 Repository 实现，
+`video_service` 不链接用户 Repository 实现；旧 `video_server` 通过
+`RepositorySet` 组合用户、视频/互动和管理员 Repository，继续保留原路由。
 
 主要表：
 
-- `users`：账号、密码、昵称、角色、状态、头像、资料。
-- `email_login_codes`：邮箱验证码会话。
+- `users`：账号、版本化密码摘要、昵称、角色、状态、头像、资料。
+- `email_login_codes`：验证码、有效期、失败次数和消费状态。
+- `email_code_rate_limits`：按邮箱串行化发送频率租约。
 - `videos`：视频元数据、作者、播放地址、审核状态。
 - `video_likes`：点赞关系。
 - `video_favorites`：收藏关系。
@@ -137,6 +197,15 @@ transcode_service 10004
 make audit-routes
 ```
 
+自动测试：
+
+```bash
+make test
+```
+
+覆盖 Bearer 解析、Gateway 头清洗/身份注入、账号越权、管理员授权、
+logout 纯 token 与幂等性、待审核视频边界和上传后的内部回读。
+
 ## Docker Compose 启动
 
 ```bash
@@ -150,6 +219,14 @@ docker compose up --build
 - `video_service`
 - `file_service`
 - `transcode_service`
+
+转码接口（均由网关校验登录身份，账号只能访问自己的任务）：
+
+- `POST /transcode/jobs`：为已有视频补建或重新排队任务，参数为 `videoId`；服务端从数据库读取源文件路径，不接受客户端指定任意文件路径。
+- `GET /transcode/jobs?videoId=...`：查询任务状态、尝试次数和最后错误。
+- `POST /transcode/jobs/retry`：将已失败或已完成的任务显式重新排队。
+
+上传到本地 `uploads` 目录的视频会自动创建 `PENDING` 任务。只有审核通过且 `transcode_status=READY` 的视频会进入公开列表和播放地址查询。Docker 镜像安装 FFmpeg，`video_service` 与 `transcode_service` 共享 `uploads_data` 卷。
 - `mysql`
 - `redis`
 - `migrate`
@@ -177,3 +254,5 @@ curl http://127.0.0.1:10000/videos
 - 第一阶段仍是共享 MySQL schema，未强行引入分布式事务。
 - `/videos/upload` 和 `/users/avatar` 为兼容现有 Qt 客户端仍保留旧路径；`file_service` 已承接 `/uploads/...` 下载和通用 `/files/upload`。
 - 未引入 etcd 注册中心、真实消息队列、服务网格或复杂熔断组件，避免超出当前项目维护能力；服务发现通过 `ServiceRegistry` 配置抽象实现，其他边界已通过 `svc_sync`、`svc_mq`、`svc_worker` 预留。
+- 内部身份头依赖 Gateway 与下游的网络隔离；若下游未来跨不可信网络
+  暴露，需要增加 mTLS 或内部请求签名。

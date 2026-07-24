@@ -1,6 +1,8 @@
 #include "http_server.h"
 
+#include "auth.h"
 #include "bitelog.h"
+#include "email_verification.h"
 #include "redis_session_manager.h"
 #include "util.h"
 
@@ -15,6 +17,8 @@
 namespace biteserver {
 namespace {
 
+std::string trimCopy(std::string value);
+
 void setJsonResponse(httplib::Response& response,
                      int status,
                      const Json::Value& body) {
@@ -25,15 +29,103 @@ void setJsonResponse(httplib::Response& response,
         "application/json; charset=utf-8");
 }
 
-std::string accountOrGuest(const httplib::Request& request) {
-    return request.has_param("account") &&
-        !request.get_param_value("account").empty()
-        ? request.get_param_value("account") : "guest";
+bool bindProtectedAccount(const httplib::Request& request,
+                          const std::string& claimedAccount,
+                          bool enforceGatewayIdentity,
+                          httplib::Response& response,
+                          std::string& account) {
+    const auto identity = biteauth::bindAuthenticatedAccount(
+        request, trimCopy(claimedAccount), enforceGatewayIdentity);
+    if (identity.status == biteauth::IdentityStatus::Allowed) {
+        account = identity.account;
+        return true;
+    }
+    Json::Value body;
+    body["success"] = false;
+    if (identity.status == biteauth::IdentityStatus::Forbidden) {
+        body["message"] = "认证账号与请求账号不一致";
+        setJsonResponse(response, 403, body);
+    } else {
+        body["message"] = "unauthorized";
+        setJsonResponse(response, 401, body);
+    }
+    return false;
 }
 
-std::string accountOrGuest(const Json::Value& payload) {
-    const std::string account = payload["account"].asString();
-    return account.empty() ? "guest" : account;
+bool requireAdministrator(const httplib::Request& request,
+                          bool enforceGatewayIdentity,
+                          biterepo::IAdminRepository* adminRepository,
+                          httplib::Response& response) {
+    if (!enforceGatewayIdentity) {
+        return true;
+    }
+    if (!adminRepository) {
+        Json::Value body;
+        body["success"] = false;
+        body["message"] = "authorization unavailable";
+        setJsonResponse(response, 500, body);
+        return false;
+    }
+    std::string account;
+    if (!bindProtectedAccount(request, "", true, response, account)) {
+        return false;
+    }
+    std::optional<bitevideo::UserAccess> access;
+    std::string error;
+    if (!adminRepository->userAccess(account, access, error)) {
+        if (bitelog::g_logger) {
+            ERR("administrator access lookup failed: {}", error);
+        }
+        Json::Value body;
+        body["success"] = false;
+        body["message"] = "authorization unavailable";
+        setJsonResponse(response, 500, body);
+        return false;
+    }
+    if (!access || access->status != "启用" ||
+        !biteauth::isAdministratorRole(access->role)) {
+        Json::Value body;
+        body["success"] = false;
+        body["message"] = "forbidden";
+        setJsonResponse(response, 403, body);
+        return false;
+    }
+    return true;
+}
+
+bool useAuthenticatedUserName(const biterepo::RepositorySet& repositories,
+                              const std::string& account,
+                              bool enforceGatewayIdentity,
+                              httplib::Response& response,
+                              std::string& userName) {
+    if (!enforceGatewayIdentity) {
+        return true;
+    }
+    std::optional<bitevideo::UserProfile> profile;
+    std::string error;
+    bool loaded = false;
+    if (repositories.users) {
+        loaded = repositories.users->userProfile(account, profile, error);
+    } else if (repositories.interactions) {
+        loaded = repositories.interactions->interactionUserProfile(
+            account, profile, error);
+    }
+    if (!loaded) {
+        Json::Value body;
+        body["success"] = false;
+        body["message"] = "用户资料暂时不可用";
+        setJsonResponse(response, 500, body);
+        return false;
+    }
+    if (!profile) {
+        Json::Value body;
+        body["success"] = false;
+        body["message"] = "forbidden";
+        setJsonResponse(response, 403, body);
+        return false;
+    }
+    userName = profile->userName;
+    return true;
 }
 
 std::size_t utf8CharCount(const std::string& value) {
@@ -263,22 +355,31 @@ bool draftFromJson(const Json::Value& payload,
 
 }  // namespace
 
-HttpServer::HttpServer(bitevideo::VideoStore& videoStore)
-    : HttpServer(videoStore, ServiceRole::All, "video_server", nullptr) {
+HttpServer::HttpServer(biterepo::RepositorySet repositories)
+    : HttpServer(repositories, ServiceRole::All, "video_server", nullptr) {
 }
 
-HttpServer::HttpServer(bitevideo::VideoStore& videoStore, ServiceRole role,
+HttpServer::HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
                        std::string serviceName)
-    : HttpServer(videoStore, role, std::move(serviceName), nullptr) {
+    : HttpServer(repositories, role, std::move(serviceName), nullptr) {
 }
 
-HttpServer::HttpServer(bitevideo::VideoStore& videoStore, ServiceRole role,
+HttpServer::HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
                        std::string serviceName,
                        bitesession::RedisSessionManager* sessionManager)
-    : videoStore_(videoStore),
+    : HttpServer(repositories, role, std::move(serviceName), sessionManager,
+                 sessionManager != nullptr) {
+}
+
+HttpServer::HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
+                       std::string serviceName,
+                       bitesession::RedisSessionManager* sessionManager,
+                       bool enforceGatewayIdentity)
+    : repositories_(repositories),
       role_(role),
       serviceName_(std::move(serviceName)),
-      sessionManager_(sessionManager) {
+      sessionManager_(sessionManager),
+      enforceGatewayIdentity_(enforceGatewayIdentity) {
     std::error_code ignored;
     std::filesystem::create_directories("uploads", ignored);
     server_.set_mount_point("/uploads", "uploads");
@@ -337,6 +438,14 @@ void HttpServer::registerRoutes() {
                 return;
             }
 
+            std::string authenticatedAccount;
+            if (!bindProtectedAccount(
+                    request, (*payload)["account"].asString(),
+                    enforceGatewayIdentity_, response,
+                    authenticatedAccount)) {
+                return;
+            }
+
             const std::string videoId =
                 trimCopy((*payload)["videoId"].asString());
             const std::string videoTitle =
@@ -353,7 +462,7 @@ void HttpServer::registerRoutes() {
             }
 
             std::string error;
-            if (!videoStore_.smokeCleanup(videoId, videoTitle, account,
+            if (!repositories_.admins->smokeCleanup(videoId, videoTitle, account,
                                           previousAvatarPath, error)) {
                 body["success"] = false;
                 body["message"] = "测试数据清理失败";
@@ -387,7 +496,7 @@ void HttpServer::registerRoutes() {
                                   httplib::Response& response) {
         std::vector<bitevideo::Video> videos;
         std::string error;
-        if (!videoStore_.list(videos, error)) {
+        if (!repositories_.videos->list(videos, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos failed: {}", error);
             }
@@ -425,6 +534,18 @@ void HttpServer::registerRoutes() {
 
         bitevideo::VideoDraft draft;
         draftFromJson(*payload, draft);
+        std::string authenticatedAccount;
+        if (!bindProtectedAccount(request, draft.account,
+                                  enforceGatewayIdentity_, response,
+                                  authenticatedAccount)) {
+            return;
+        }
+        draft.account = authenticatedAccount;
+        if (!useAuthenticatedUserName(repositories_, draft.account,
+                                      enforceGatewayIdentity_, response,
+                                      draft.userName)) {
+            return;
+        }
 
         if (draft.title.empty()) {
             body["success"] = false;
@@ -453,7 +574,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<bitevideo::Video> video;
         std::string error;
-        if (!videoStore_.createVideo(draft, video, error)) {
+        if (!repositories_.videos->createVideo(draft, video, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /videos failed: {}", error);
             }
@@ -508,6 +629,18 @@ void HttpServer::registerRoutes() {
             body["success"] = false;
             body["message"] = "视频元数据格式错误";
             setJsonResponse(response, 200, body);
+            return;
+        }
+        std::string authenticatedAccount;
+        if (!bindProtectedAccount(request, draft.account,
+                                  enforceGatewayIdentity_, response,
+                                  authenticatedAccount)) {
+            return;
+        }
+        draft.account = authenticatedAccount;
+        if (!useAuthenticatedUserName(repositories_, draft.account,
+                                      enforceGatewayIdentity_, response,
+                                      draft.userName)) {
             return;
         }
         const auto videoPart = request.get_file_value("videoFile");
@@ -592,7 +725,7 @@ void HttpServer::registerRoutes() {
 
         draft.playUrl = videoPath.generic_string();
         std::optional<bitevideo::Video> video;
-        if (!videoStore_.createVideo(draft, video, error)) {
+        if (!repositories_.videos->createVideo(draft, video, error)) {
             removeUploadedVideo();
             if (!storedCoverPath.empty()) {
                 std::error_code ignored;
@@ -645,7 +778,7 @@ void HttpServer::registerRoutes() {
         const std::string password = (*payload)["password"].asString();
         std::optional<bitevideo::UserProfile> profile;
         std::string error;
-        if (!videoStore_.passwordLogin(account, password, profile, error)) {
+        if (!repositories_.users->passwordLogin(account, password, profile, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /login failed: {}", error);
             }
@@ -692,7 +825,7 @@ void HttpServer::registerRoutes() {
         const std::string password = (*payload)["password"].asString();
         std::optional<bitevideo::UserProfile> profile;
         std::string error;
-        if (!videoStore_.passwordLogin(account, password, profile, error)) {
+        if (!repositories_.users->passwordLogin(account, password, profile, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /login/password failed: {}", error);
             }
@@ -740,7 +873,7 @@ void HttpServer::registerRoutes() {
         bitevideo::EmailCodeSession session;
         std::string error;
         const std::string email = trimCopy((*payload)["email"].asString());
-        if (!videoStore_.createEmailCode(email, session, error)) {
+        if (!repositories_.users->createEmailCode(email, session, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /login/email-code failed: {}", error);
             }
@@ -755,7 +888,10 @@ void HttpServer::registerRoutes() {
             body["success"] = true;
             body["message"] = "验证码已发送";
             body["authcodeId"] = session.authcodeId;
-            body["debugCode"] = session.debugCode;
+            if (biteauth::emailDebugCodeEnabled() &&
+                !session.debugCode.empty()) {
+                body["debugCode"] = session.debugCode;
+            }
             setJsonResponse(response, 200, body);
         }
     });
@@ -778,7 +914,7 @@ void HttpServer::registerRoutes() {
             trimCopy((*payload)["authcode"].asString());
         std::optional<bitevideo::UserProfile> profile;
         std::string error;
-        if (!videoStore_.emailLogin(
+        if (!repositories_.users->emailLogin(
                 email, authcodeId, authcode, profile, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /login/email failed: {}", error);
@@ -825,32 +961,43 @@ void HttpServer::registerRoutes() {
 
         bool knownUser = false;
         std::string error;
-        const std::string account = trimCopy((*payload)["account"].asString());
+        std::string account;
+        if (!bindProtectedAccount(
+                request, (*payload)["account"].asString(),
+                enforceGatewayIdentity_, response, account)) {
+            return;
+        }
         if (account.empty()) {
             body["success"] = false;
             body["message"] = "当前没有登录用户";
             setJsonResponse(response, 200, body);
             return;
         }
-        if (!videoStore_.logout(account, knownUser, error)) {
+        if (!repositories_.users->logout(account, knownUser, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /logout failed: {}", error);
             }
             body["success"] = false;
             body["message"] = "退出登录失败";
             setJsonResponse(response, 500, body);
-        } else if (!knownUser) {
-            body["success"] = false;
-            body["message"] = "用户不存在";
-            setJsonResponse(response, 200, body);
         } else {
-            const std::string token = request.has_header("Authorization")
-                ? request.get_header_value("Authorization") : "";
-            if (sessionManager_ && !token.empty() &&
-                !sessionManager_->deleteToken(token, error)) {
+            const auto token = biteauth::parseBearerToken(
+                request.get_header_value("Authorization"));
+            if (enforceGatewayIdentity_ && !token) {
+                body["success"] = false;
+                body["message"] = "unauthorized";
+                setJsonResponse(response, 401, body);
+                return;
+            }
+            if (sessionManager_ && token &&
+                !sessionManager_->deleteToken(*token, error)) {
                 if (bitelog::g_logger) {
                     ERR("POST /logout redis session delete failed: {}", error);
                 }
+                body["success"] = false;
+                body["message"] = "退出登录暂时不可用";
+                setJsonResponse(response, 503, body);
+                return;
             }
             body["success"] = true;
             body["message"] = "已退出登录";
@@ -871,7 +1018,7 @@ void HttpServer::registerRoutes() {
         } else {
             std::optional<bitevideo::Video> video;
             std::string error;
-            if (!videoStore_.findById(videoId, video, error)) {
+            if (!repositories_.videos->findById(videoId, video, error)) {
                 if (bitelog::g_logger) {
                     ERR("GET /videos/detail failed: {}", error);
                 }
@@ -910,7 +1057,7 @@ void HttpServer::registerRoutes() {
 
         std::vector<bitevideo::Video> videos;
         std::string error;
-        if (!videoStore_.search(keyword, videos, error)) {
+        if (!repositories_.videos->search(keyword, videos, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/search failed: {}", error);
             }
@@ -942,7 +1089,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<std::string> playUrl;
         std::string error;
-        if (!videoStore_.playUrl(videoId, playUrl, error)) {
+        if (!repositories_.videos->playUrl(videoId, playUrl, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/play-url failed: {}", error);
             }
@@ -968,9 +1115,16 @@ void HttpServer::registerRoutes() {
         Json::Value body;
         const std::string videoId = request.has_param("videoId")
             ? request.get_param_value("videoId") : "";
-        const std::string account = request.has_param("account") &&
-            !request.get_param_value("account").empty()
-            ? request.get_param_value("account") : "guest";
+        const std::string claimedAccount = request.has_param("account")
+            ? request.get_param_value("account") : "";
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
+        if (account.empty()) {
+            account = "guest";
+        }
         if (videoId.empty()) {
             body["success"] = false;
             body["message"] = "视频 id 不能为空";
@@ -980,7 +1134,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<bitevideo::LikeStatus> status;
         std::string error;
-        if (!videoStore_.likeStatus(videoId, account, status, error)) {
+        if (!repositories_.interactions->likeStatus(videoId, account, status, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/like-status failed: {}", error);
             }
@@ -1012,7 +1166,12 @@ void HttpServer::registerRoutes() {
         }
 
         const std::string videoId = (*payload)["videoId"].asString();
-        std::string account = (*payload)["account"].asString();
+        const std::string claimedAccount = (*payload)["account"].asString();
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
         if (account.empty()) {
             account = "guest";
         }
@@ -1025,7 +1184,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<bitevideo::LikeStatus> status;
         std::string error;
-        if (!videoStore_.setLiked(videoId, account, shouldLike, status, error)) {
+        if (!repositories_.interactions->setLiked(videoId, account, shouldLike, status, error)) {
             if (bitelog::g_logger) {
                 ERR("video like change failed: {}", error);
             }
@@ -1061,7 +1220,16 @@ void HttpServer::registerRoutes() {
         Json::Value body;
         const std::string videoId = request.has_param("videoId")
             ? request.get_param_value("videoId") : "";
-        const std::string account = accountOrGuest(request);
+        const std::string claimedAccount = request.has_param("account")
+            ? request.get_param_value("account") : "";
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
+        if (account.empty()) {
+            account = "guest";
+        }
         if (videoId.empty()) {
             body["success"] = false;
             body["message"] = "视频 id 不能为空";
@@ -1071,7 +1239,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<bitevideo::WatchProgress> progress;
         std::string error;
-        if (!videoStore_.watchProgress(videoId, account, progress, error)) {
+        if (!repositories_.interactions->watchProgress(videoId, account, progress, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/watch-progress failed: {}", error);
             }
@@ -1103,7 +1271,15 @@ void HttpServer::registerRoutes() {
         }
 
         const std::string videoId = (*payload)["videoId"].asString();
-        const std::string account = accountOrGuest(*payload);
+        const std::string claimedAccount = (*payload)["account"].asString();
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
+        if (account.empty()) {
+            account = "guest";
+        }
         if (videoId.empty()) {
             body["success"] = false;
             body["message"] = "视频 id 不能为空";
@@ -1119,7 +1295,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<bitevideo::WatchProgress> progress;
         std::string error;
-        if (!videoStore_.saveWatchProgress(
+        if (!repositories_.interactions->saveWatchProgress(
                 videoId, account, (*payload)["seconds"].asInt(), progress, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /videos/watch-progress failed: {}", error);
@@ -1145,8 +1321,13 @@ void HttpServer::registerRoutes() {
         Json::Value body;
         const std::string videoId = request.has_param("videoId")
             ? request.get_param_value("videoId") : "";
-        const std::string account = request.has_param("account")
+        const std::string claimedAccount = request.has_param("account")
             ? request.get_param_value("account") : "";
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
         if (videoId.empty() || account.empty()) {
             body["success"] = false;
             body["message"] = "视频 id 和账号不能为空";
@@ -1156,7 +1337,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<bitevideo::FavoriteStatus> status;
         std::string error;
-        if (!videoStore_.favoriteStatus(videoId, account, status, error)) {
+        if (!repositories_.interactions->favoriteStatus(videoId, account, status, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/favorite-status failed: {}", error);
             }
@@ -1187,7 +1368,12 @@ void HttpServer::registerRoutes() {
         }
 
         const std::string videoId = (*payload)["videoId"].asString();
-        const std::string account = (*payload)["account"].asString();
+        const std::string claimedAccount = (*payload)["account"].asString();
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
         if (videoId.empty()) {
             body["success"] = false;
             body["message"] = "视频 id 不能为空";
@@ -1203,7 +1389,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<bitevideo::FavoriteStatus> status;
         std::string error;
-        if (!videoStore_.setFavorited(
+        if (!repositories_.interactions->setFavorited(
                 videoId, account, shouldFavorite, status, error)) {
             if (bitelog::g_logger) {
                 ERR("video favorite change failed: {}", error);
@@ -1236,8 +1422,13 @@ void HttpServer::registerRoutes() {
     server_.Get("/users/favorites", [this](const httplib::Request& request,
                                            httplib::Response& response) {
         Json::Value body;
-        const std::string account = request.has_param("account")
+        const std::string claimedAccount = request.has_param("account")
             ? request.get_param_value("account") : "";
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
         if (account.empty()) {
             body["success"] = false;
             body["message"] = "请先登录后查看收藏";
@@ -1247,7 +1438,7 @@ void HttpServer::registerRoutes() {
 
         std::vector<bitevideo::Video> videos;
         std::string error;
-        if (!videoStore_.favoriteVideos(account, videos, error)) {
+        if (!repositories_.interactions->favoriteVideos(account, videos, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /users/favorites failed: {}", error);
             }
@@ -1270,8 +1461,13 @@ void HttpServer::registerRoutes() {
     server_.Get("/users/videos", [this](const httplib::Request& request,
                                         httplib::Response& response) {
         Json::Value body;
-        const std::string account = request.has_param("account")
+        const std::string claimedAccount = request.has_param("account")
             ? request.get_param_value("account") : "";
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
         if (account.empty()) {
             body["success"] = false;
             body["message"] = "请先登录后查看作品";
@@ -1281,7 +1477,7 @@ void HttpServer::registerRoutes() {
 
         std::vector<bitevideo::Video> videos;
         std::string error;
-        if (!videoStore_.ownerVideos(account, videos, error)) {
+        if (!repositories_.videos->ownerVideos(account, videos, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /users/videos failed: {}", error);
             }
@@ -1304,6 +1500,11 @@ void HttpServer::registerRoutes() {
     server_.Get("/videos/comments", [this](const httplib::Request& request,
                                            httplib::Response& response) {
         Json::Value body;
+        std::string authenticatedAccount;
+        if (!bindProtectedAccount(request, "", enforceGatewayIdentity_,
+                                  response, authenticatedAccount)) {
+            return;
+        }
         const std::string videoId = request.has_param("videoId")
             ? request.get_param_value("videoId") : "";
         if (videoId.empty()) {
@@ -1315,7 +1516,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<std::vector<bitevideo::VideoComment>> comments;
         std::string error;
-        if (!videoStore_.comments(videoId, comments, error)) {
+        if (!repositories_.interactions->comments(videoId, comments, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/comments failed: {}", error);
             }
@@ -1348,8 +1549,18 @@ void HttpServer::registerRoutes() {
         }
 
         const std::string videoId = (*payload)["videoId"].asString();
-        const std::string userName = (*payload)["userName"].asString();
-        const std::string account = (*payload)["account"].asString();
+        std::string userName = (*payload)["userName"].asString();
+        const std::string claimedAccount = (*payload)["account"].asString();
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
+        if (!useAuthenticatedUserName(repositories_, account,
+                                      enforceGatewayIdentity_, response,
+                                      userName)) {
+            return;
+        }
         const std::string content = (*payload)["content"].asString();
         if (videoId.empty()) {
             body["success"] = false;
@@ -1372,7 +1583,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<bitevideo::VideoComment> comment;
         std::string error;
-        if (!videoStore_.addComment(
+        if (!repositories_.interactions->addComment(
                 videoId, userName, account, content, comment, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /videos/comments failed: {}", error);
@@ -1395,6 +1606,11 @@ void HttpServer::registerRoutes() {
     server_.Get("/videos/barrages", [this](const httplib::Request& request,
                                            httplib::Response& response) {
         Json::Value body;
+        std::string authenticatedAccount;
+        if (!bindProtectedAccount(request, "", enforceGatewayIdentity_,
+                                  response, authenticatedAccount)) {
+            return;
+        }
         const std::string videoId = request.has_param("videoId")
             ? request.get_param_value("videoId") : "";
         if (videoId.empty()) {
@@ -1406,7 +1622,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<std::vector<bitevideo::VideoBarrage>> barrages;
         std::string error;
-        if (!videoStore_.barrages(videoId, barrages, error)) {
+        if (!repositories_.interactions->barrages(videoId, barrages, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/barrages failed: {}", error);
             }
@@ -1438,6 +1654,13 @@ void HttpServer::registerRoutes() {
             return;
         }
 
+        std::string authenticatedAccount;
+        if (!bindProtectedAccount(
+                request, (*payload)["account"].asString(),
+                enforceGatewayIdentity_, response, authenticatedAccount)) {
+            return;
+        }
+
         const std::string videoId = (*payload)["videoId"].asString();
         const std::string text = (*payload)["text"].asString();
         if (videoId.empty()) {
@@ -1463,7 +1686,7 @@ void HttpServer::registerRoutes() {
             ? utf8Prefix(text, 30) : text;
         std::optional<bitevideo::VideoBarrage> barrage;
         std::string error;
-        if (!videoStore_.addBarrage(
+        if (!repositories_.interactions->addBarrage(
                 videoId, (*payload)["seconds"].asInt(), clippedText,
                 barrage, error)) {
             if (bitelog::g_logger) {
@@ -1490,8 +1713,13 @@ void HttpServer::registerRoutes() {
     server_.Get("/users/profile", [this](const httplib::Request& request,
                                          httplib::Response& response) {
         Json::Value body;
-        const std::string account = request.has_param("account")
+        const std::string claimedAccount = request.has_param("account")
             ? request.get_param_value("account") : "";
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
         if (account.empty()) {
             body["success"] = false;
             body["message"] = "用户不存在";
@@ -1501,7 +1729,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<bitevideo::UserProfile> profile;
         std::string error;
-        if (!videoStore_.userProfile(account, profile, error)) {
+        if (!repositories_.users->userProfile(account, profile, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /users/profile failed: {}", error);
             }
@@ -1530,7 +1758,12 @@ void HttpServer::registerRoutes() {
             return;
         }
 
-        const std::string account = (*payload)["account"].asString();
+        const std::string claimedAccount = (*payload)["account"].asString();
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
         const std::string userName = (*payload)["userName"].asString();
         const std::string description = (*payload)["description"].asString();
         if (account.empty()) {
@@ -1554,7 +1787,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<bitevideo::UserProfile> profile;
         std::string error;
-        if (!videoStore_.updateUserProfile(
+        if (!repositories_.users->updateUserProfile(
                 account, userName, description, profile, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /users/profile failed: {}", error);
@@ -1584,16 +1817,22 @@ void HttpServer::registerRoutes() {
             setJsonResponse(response, 200, body);
             return;
         }
-        if (!request.has_file("account") || !request.has_file("avatarFile")) {
+        if (!request.has_file("avatarFile") ||
+            (!enforceGatewayIdentity_ && !request.has_file("account"))) {
             body["success"] = false;
             body["message"] = "头像上传格式错误";
             setJsonResponse(response, 200, body);
             return;
         }
 
-        const auto accountPart = request.get_file_value("account");
         const auto avatarPart = request.get_file_value("avatarFile");
-        const std::string account = trimCopy(accountPart.content);
+        const std::string claimedAccount = request.has_file("account")
+            ? request.get_file_value("account").content : "";
+        std::string account;
+        if (!bindProtectedAccount(request, claimedAccount,
+                                  enforceGatewayIdentity_, response, account)) {
+            return;
+        }
         const std::string avatarName = pathFileName(avatarPart.filename);
         if (account.empty()) {
             body["success"] = false;
@@ -1612,7 +1851,7 @@ void HttpServer::registerRoutes() {
 
         std::optional<bitevideo::UserProfile> profile;
         std::string error;
-        if (!videoStore_.userProfile(account, profile, error)) {
+        if (!repositories_.users->userProfile(account, profile, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /users/avatar profile lookup failed: {}", error);
             }
@@ -1642,7 +1881,7 @@ void HttpServer::registerRoutes() {
         }
 
         bool updated = false;
-        if (!videoStore_.updateAvatarPath(
+        if (!repositories_.users->updateAvatarPath(
                 account, avatarPath.generic_string(), updated, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /users/avatar failed: {}", error);
@@ -1664,12 +1903,16 @@ void HttpServer::registerRoutes() {
     }
 
     if (video) {
-    server_.Get("/admin/reviews", [this](const httplib::Request&,
+    server_.Get("/admin/reviews", [this](const httplib::Request& request,
                                          httplib::Response& response) {
+        if (!requireAdministrator(request, enforceGatewayIdentity_,
+                                  repositories_.admins, response)) {
+            return;
+        }
         Json::Value body;
         std::vector<bitevideo::AdminReview> reviews;
         std::string error;
-        if (!videoStore_.adminReviews(reviews, error)) {
+        if (!repositories_.admins->adminReviews(reviews, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /admin/reviews failed: {}", error);
             }
@@ -1690,6 +1933,10 @@ void HttpServer::registerRoutes() {
     server_.Post("/admin/reviews/action",
                  [this](const httplib::Request& request,
                         httplib::Response& response) {
+        if (!requireAdministrator(request, enforceGatewayIdentity_,
+                                  repositories_.admins, response)) {
+            return;
+        }
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -1703,7 +1950,7 @@ void HttpServer::registerRoutes() {
         std::string error;
         const std::string videoId = trimCopy((*payload)["videoId"].asString());
         const std::string status = trimCopy((*payload)["status"].asString());
-        if (!videoStore_.updateReviewStatus(videoId, status, updated, error)) {
+        if (!repositories_.admins->updateReviewStatus(videoId, status, updated, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /admin/reviews/action failed: {}", error);
             }
@@ -1723,12 +1970,16 @@ void HttpServer::registerRoutes() {
     }
 
     if (user) {
-    server_.Get("/admin/users", [this](const httplib::Request&,
+    server_.Get("/admin/users", [this](const httplib::Request& request,
                                       httplib::Response& response) {
+        if (!requireAdministrator(request, enforceGatewayIdentity_,
+                                  repositories_.admins, response)) {
+            return;
+        }
         Json::Value body;
         std::vector<bitevideo::AdminUser> users;
         std::string error;
-        if (!videoStore_.adminUsers(users, error)) {
+        if (!repositories_.admins->adminUsers(users, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /admin/users failed: {}", error);
             }
@@ -1749,6 +2000,10 @@ void HttpServer::registerRoutes() {
     server_.Post("/admin/users/action",
                  [this](const httplib::Request& request,
                         httplib::Response& response) {
+        if (!requireAdministrator(request, enforceGatewayIdentity_,
+                                  repositories_.admins, response)) {
+            return;
+        }
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -1762,7 +2017,7 @@ void HttpServer::registerRoutes() {
         std::string error;
         const std::string account = trimCopy((*payload)["account"].asString());
         const std::string action = trimCopy((*payload)["action"].asString());
-        if (!videoStore_.updateAdminUser(account, action, updated, error)) {
+        if (!repositories_.admins->updateAdminUser(account, action, updated, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /admin/users/action failed: {}", error);
             }

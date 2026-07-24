@@ -31,11 +31,29 @@ struct RedisSettings {
     int sessionTtlSeconds = 86400;
 };
 
+struct AuthSettings {
+    bool enforceGatewayIdentity = false;
+};
+
+struct TranscodeSettings {
+    bool enabled = true;
+    int workerThreads = 1;
+    int pollIntervalMs = 500;
+    int leaseSeconds = 300;
+    int maxAttempts = 3;
+    int retryDelaySeconds = 30;
+    std::string ffmpegPath = "ffmpeg";
+    std::string uploadRoot = "uploads";
+    std::string outputRoot = "uploads/transcoded";
+};
+
 struct AppSettings {
     ServerSettings server;
     bitelog::Logsettings log;
     DatabaseSettings database;
     RedisSettings redis;
+    AuthSettings auth;
+    TranscodeSettings transcode;
 };
 
 class Config {

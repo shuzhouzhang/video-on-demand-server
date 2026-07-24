@@ -4,12 +4,22 @@
 
 namespace svc_video {
 
-VideoRpcService::VideoRpcService(bitevideo::VideoStore& repository,
-             bitesession::RedisSessionManager* sessions)
-    : repository_(repository), sessions_(sessions) {}
+VideoRpcService::VideoRpcService(
+    biterepo::IVideoRepository& videoRepository,
+    biterepo::IInteractionRepository& interactionRepository,
+    biterepo::IAdminRepository& adminRepository,
+    bitesession::RedisSessionManager* sessions)
+    : videoRepository_(videoRepository),
+      interactionRepository_(interactionRepository),
+      adminRepository_(adminRepository),
+      sessions_(sessions) {}
 
 int VideoRpcService::listen(const std::string& host, std::uint16_t port) {
-    biteserver::HttpServer server(repository_,
+    biterepo::RepositorySet repositories;
+    repositories.videos = &videoRepository_;
+    repositories.interactions = &interactionRepository_;
+    repositories.admins = &adminRepository_;
+    biteserver::HttpServer server(repositories,
                                   biteserver::ServiceRole::Video,
                                   "video_service",
                                   sessions_);

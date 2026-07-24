@@ -10,13 +10,15 @@ namespace svc_user {
 
 class UserRpcService {
 public:
-    UserRpcService(bitevideo::VideoStore& repository,
-           bitesession::RedisSessionManager* sessions);
+    UserRpcService(biterepo::IUserRepository& userRepository,
+                   biterepo::IAdminRepository& adminRepository,
+                   bitesession::RedisSessionManager* sessions);
 
     int listen(const std::string& host, std::uint16_t port);
 
 private:
-    bitevideo::VideoStore& repository_;
+    biterepo::IUserRepository& userRepository_;
+    biterepo::IAdminRepository& adminRepository_;
     bitesession::RedisSessionManager* sessions_;
 };
 

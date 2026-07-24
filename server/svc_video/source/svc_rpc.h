@@ -10,13 +10,17 @@ namespace svc_video {
 
 class VideoRpcService {
 public:
-    VideoRpcService(bitevideo::VideoStore& repository,
-           bitesession::RedisSessionManager* sessions);
+    VideoRpcService(biterepo::IVideoRepository& videoRepository,
+                    biterepo::IInteractionRepository& interactionRepository,
+                    biterepo::IAdminRepository& adminRepository,
+                    bitesession::RedisSessionManager* sessions);
 
     int listen(const std::string& host, std::uint16_t port);
 
 private:
-    bitevideo::VideoStore& repository_;
+    biterepo::IVideoRepository& videoRepository_;
+    biterepo::IInteractionRepository& interactionRepository_;
+    biterepo::IAdminRepository& adminRepository_;
     bitesession::RedisSessionManager* sessions_;
 };
 

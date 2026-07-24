@@ -24,4 +24,9 @@ struct AdminUser {
     std::string createdAt;
 };
 
+struct UserAccess {
+    std::string role;
+    std::string status;
+};
+
 }  // namespace bitevideo

@@ -6,7 +6,8 @@ namespace svc_video {
 
 VideoDataFacade::VideoDataFacade(bitedb::Database& database) : database_(database) {}
 
-std::unique_ptr<bitevideo::VideoStore> VideoDataFacade::createRepository() const {
+std::unique_ptr<bitevideo::MySqlVideoRepository>
+VideoDataFacade::createRepository() const {
     return std::make_unique<bitevideo::MySqlVideoRepository>(database_);
 }
 

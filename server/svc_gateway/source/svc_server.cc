@@ -1,5 +1,6 @@
 #include "svc_server.h"
 
+#include "../../common/auth.h"
 #include "../../common/config.h"
 #include "../../common/http_client.h"
 #include "../../common/redis_session_manager.h"
@@ -105,7 +106,7 @@ std::string selectDownstreamName(const std::string& path) {
     if (path == "/files/upload" || path.rfind("/uploads/", 0) == 0) {
         return "file_service";
     }
-    if (path == "/transcode/jobs") {
+    if (path == "/transcode/jobs" || path == "/transcode/jobs/retry") {
         return "transcode_service";
     }
     if (path == "/videos" || path == "/videos/detail" ||
@@ -117,18 +118,6 @@ std::string selectDownstreamName(const std::string& path) {
     }
     return "";
 }
-std::string bearerToken(const httplib::Request& request) {
-    if (!request.has_header("Authorization")) {
-        return "";
-    }
-    std::string value = request.get_header_value("Authorization");
-    constexpr char prefix[] = "Bearer ";
-    if (value.rfind(prefix, 0) == 0) {
-        value.erase(0, sizeof(prefix) - 1);
-    }
-    return value;
-}
-
 bool requiresAuth(const std::string& method, const std::string& path) {
     if (path == "/login" || path == "/login/password" ||
         path == "/login/email-code" || path == "/login/email" ||
@@ -146,27 +135,37 @@ bool requiresAuth(const std::string& method, const std::string& path) {
 
 bool verifyTokenIfNeeded(bitesession::RedisSessionManager& sessions,
                          const httplib::Request& request,
-                         httplib::Response& response) {
-    if (!sessions.enabled() || !requiresAuth(request.method, request.path)) {
-        return true;
-    }
-
+                         httplib::Response& response,
+                         std::optional<std::string>& authenticatedAccount) {
+    authenticatedAccount.reset();
+    const auto result = biteauth::authenticateGatewayRequest(
+        sessions.enabled(), requiresAuth(request.method, request.path),
+        request.get_header_value("Authorization"),
+        [&sessions](const std::string& token, std::string& error) {
+            return sessions.accountForToken(token, error);
+        });
     Json::Value body;
-    const std::string token = bearerToken(request);
-    std::string error;
-    const auto account = sessions.accountForToken(token, error);
-    if (!error.empty()) {
+    if (result.status == biteauth::GatewayAuthStatus::DependencyUnavailable) {
         body["success"] = false;
         body["message"] = "token verification unavailable";
-        setJsonResponse(response, 502, body);
+        setJsonResponse(response, 503, body);
         return false;
     }
-    if (!account || account->empty()) {
+    if (result.status == biteauth::GatewayAuthStatus::SessionAbsent &&
+        request.path == "/logout") {
+        body["success"] = true;
+        body["message"] = "logout success";
+        setJsonResponse(response, 200, body);
+        return false;
+    }
+    if (result.status == biteauth::GatewayAuthStatus::Unauthorized ||
+        result.status == biteauth::GatewayAuthStatus::SessionAbsent) {
         body["success"] = false;
         body["message"] = "unauthorized";
         setJsonResponse(response, 401, body);
         return false;
     }
+    authenticatedAccount = result.account;
     return true;
 }
 
@@ -185,7 +184,8 @@ void logGatewayError(const std::string& requestId,
 void forwardToDownstream(const GatewaySettings& settings,
                          const bitesvc::ServiceEndpoint& downstream,
                          const httplib::Request& request,
-                         httplib::Response& response) {
+                         httplib::Response& response,
+                         const std::optional<std::string>& authenticatedAccount) {
     const std::string requestId = request.has_header("X-Request-Id")
         ? request.get_header_value("X-Request-Id") : makeRequestId();
     const std::string target = requestPathWithQuery(request);
@@ -198,6 +198,8 @@ void forwardToDownstream(const GatewaySettings& settings,
     headers.erase("Transfer-Encoding");
     headers.erase("X-Request-Id");
     headers.emplace("X-Request-Id", requestId);
+    // Strip every client assertion before adding the Redis-backed identity.
+    biteauth::applyGatewayIdentity(headers, authenticatedAccount);
 
     if (request.method != "GET" && request.method != "POST") {
         Json::Value body;
@@ -277,7 +279,9 @@ int GatewayServerBuilder::start() const {
 
     const auto handler = [&settings, &sessions](const httplib::Request& request,
                                                 httplib::Response& response) {
-        if (!verifyTokenIfNeeded(sessions, request, response)) {
+        std::optional<std::string> authenticatedAccount;
+        if (!verifyTokenIfNeeded(sessions, request, response,
+                                 authenticatedAccount)) {
             return;
         }
         const std::string downstreamName = selectDownstreamName(request.path);
@@ -296,7 +300,8 @@ int GatewayServerBuilder::start() const {
             setJsonResponse(response, 502, body);
             return;
         }
-        forwardToDownstream(settings, *downstream, request, response);
+        forwardToDownstream(settings, *downstream, request, response,
+                            authenticatedAccount);
     };
 
     server.Get(R"(/.*)", handler);

@@ -14,16 +14,21 @@ VIDEO_SERVICE_LOG ?= /tmp/video_service_dev.log
 FILE_SERVICE_LOG ?= /tmp/file_service_dev.log
 TRANSCODE_SERVICE_LOG ?= /tmp/transcode_service_dev.log
 BASE_URL ?= http://127.0.0.1:10000
-COMMON_SOURCES = server/common/config.cc server/common/redis_session_manager.cc \
+CORE_SOURCES = server/common/auth.cc server/common/email_verification.cc \
+		server/common/config.cc \
+		server/common/redis_session_manager.cc \
 		server/database/database.cc \
-		server/data/video.cc server/svc_video/source/video_repository.cc \
-		server/svc_user/source/user_repository.cc server/common/util.cc \
+		server/data/video.cc server/repository/admin_repository.cc \
+		server/common/util.cc \
 		server/common/bitelog.cc
+USER_SOURCES = server/svc_user/source/user_repository.cc \
+		server/common/password_hash.cc
+VIDEO_SOURCES = server/svc_video/source/video_repository.cc
 COMMON_LIBS = -L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \
-		-lmysqlclient -lcpp-httplib -lhiredis -pthread
+		-lmysqlclient -lcpp-httplib -lhiredis -lcrypto -pthread
 
 server: server/common/server_main.cc server/common/http_server.cc \
-		$(COMMON_SOURCES)
+		$(CORE_SOURCES) $(USER_SOURCES) $(VIDEO_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_server \
 		$(COMMON_LIBS)
 
@@ -31,7 +36,7 @@ user_service: server/svc_user/source/main.cc server/svc_user/source/svc_server.c
 		server/svc_user/source/svc_data.cc \
 		server/svc_user/source/svc_rpc.cc server/svc_user/source/svc_sync.cc \
 		server/svc_user/source/svc_mq.cc server/common/http_server.cc \
-		$(COMMON_SOURCES)
+		$(CORE_SOURCES) $(USER_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o user_service \
 		$(COMMON_LIBS)
 
@@ -39,7 +44,7 @@ video_service: server/svc_video/source/main.cc server/svc_video/source/svc_serve
 		server/svc_video/source/svc_data.cc \
 		server/svc_video/source/svc_rpc.cc server/svc_video/source/svc_sync.cc \
 		server/svc_video/source/svc_mq.cc server/common/http_server.cc \
-		$(COMMON_SOURCES)
+		$(CORE_SOURCES) $(VIDEO_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_service \
 		$(COMMON_LIBS)
 
@@ -53,20 +58,22 @@ file_service: server/svc_file/source/main.cc server/svc_file/source/svc_server.c
 transcode_service: server/svc_transcode/source/main.cc \
 		server/svc_transcode/source/svc_server.cc \
 		server/svc_transcode/source/svc_data.cc server/svc_transcode/source/svc_rpc.cc \
-		server/svc_transcode/source/svc_mq.cc server/svc_transcode/source/svc_worker.cc \
-		server/common/config.cc server/common/util.cc server/common/bitelog.cc
+		server/svc_transcode/source/svc_worker.cc server/common/auth.cc \
+		server/common/config.cc server/common/util.cc server/common/bitelog.cc \
+		server/database/database.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o transcode_service \
-		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread
+		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -lodb-mysql \
+		-lodb -lmysqlclient -pthread
 
 interaction_service: source/service_main.cc source/http_server.cc \
-		$(COMMON_SOURCES)
+		$(CORE_SOURCES) $(VIDEO_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o interaction_service \
 		$(COMMON_LIBS)
 
 api_gateway: server/svc_gateway/source/main.cc \
 		server/svc_gateway/source/svc_server.cc \
 		server/svc_gateway/source/svc_data.cc server/svc_gateway/source/svc_rpc.cc \
-		server/common/http_client.cc server/common/config.cc server/common/service_registry.cc \
+		server/common/http_client.cc server/common/auth.cc server/common/config.cc server/common/service_registry.cc \
 		server/common/redis_session_manager.cc server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o api_gateway \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib \
@@ -82,10 +89,13 @@ migrate: server/database/migrate_main.cc server/common/config.cc \
 
 # Run the project's current automated test suite from one stable entry point.
 test:
+	$(MAKE) -C test/auth test
 	$(MAKE) -C test/util test
 	$(MAKE) -C test/config test
 	$(MAKE) -C test/http test
 	$(MAKE) -C test/database test
+	$(MAKE) -C test/repository test
+	$(MAKE) -C test/transcode test
 
 # Check whether the backend still covers the expected client route contract.
 audit-routes:
@@ -175,10 +185,13 @@ dev-smoke-write-ms:
 
 # Remove locally generated build artifacts.
 clean:
+	$(MAKE) -C test/auth clean
 	$(MAKE) -C test/util clean
 	$(MAKE) -C test/config clean
 	$(MAKE) -C test/http clean
 	$(MAKE) -C test/database clean
+	$(MAKE) -C test/repository clean
+	$(MAKE) -C test/transcode clean
 	$(MAKE) -C example/spdlog clean
 	rm -f video_server
 	rm -f api_gateway

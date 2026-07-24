@@ -15,6 +15,7 @@ RUN apt-get update && \
     libodb-dev \
     libodb-mysql-dev \
     libspdlog-dev \
+    ffmpeg \
     make \
     python3 && break; \
     apt-get update; \

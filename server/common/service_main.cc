@@ -2,6 +2,7 @@
 #include "http_server.h"
 #include "redis_session_manager.h"
 #include "../database/database.h"
+#include "../repository/admin_repository.h"
 #include "../svc_user/source/user_repository.h"
 #include "../svc_video/source/video_repository.h"
 
@@ -79,16 +80,32 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::unique_ptr<bitevideo::VideoStore> repository;
+    std::unique_ptr<biteuser::MySqlUserRepository> userRepository;
+    std::unique_ptr<bitevideo::MySqlVideoRepository> videoRepository;
+    auto adminRepository =
+        std::make_unique<biterepo::MySqlAdminRepository>(database);
+    biterepo::RepositorySet repositories;
+    repositories.admins = adminRepository.get();
     if (role == biteserver::ServiceRole::User) {
-        repository = std::make_unique<biteuser::MySqlUserRepository>(database);
+        userRepository =
+            std::make_unique<biteuser::MySqlUserRepository>(database);
+        repositories.users = userRepository.get();
     } else {
-        repository = std::make_unique<bitevideo::MySqlVideoRepository>(database);
+        videoRepository =
+            std::make_unique<bitevideo::MySqlVideoRepository>(database);
+        repositories.videos = videoRepository.get();
+        repositories.interactions = videoRepository.get();
+        if (role == biteserver::ServiceRole::All) {
+            userRepository =
+                std::make_unique<biteuser::MySqlUserRepository>(database);
+            repositories.users = userRepository.get();
+        }
     }
 
-    biteserver::HttpServer server(*repository, role, serviceName,
+    biteserver::HttpServer server(repositories, role, serviceName,
                                   sessionManager.enabled()
-                                      ? &sessionManager : nullptr);
+                                      ? &sessionManager : nullptr,
+                                  settings->auth.enforceGatewayIdentity);
     if (!server.listen("0.0.0.0", settings->server.port)) {
         ERR("{} failed to listen on port {}", serviceName, settings->server.port);
         return 1;

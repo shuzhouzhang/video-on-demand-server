@@ -29,8 +29,6 @@ public:
     bool deleteToken(const std::string& token, std::string& error);
 
 private:
-    std::string keyForToken(const std::string& token) const;
-
     biteconfig::RedisSettings settings_;
     redisContext* context_ = nullptr;
 };

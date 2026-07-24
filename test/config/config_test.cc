@@ -1,5 +1,5 @@
-#include "../../source/config.h"
-#include "../../source/util.h"
+#include "../../server/common/config.h"
+#include "../../server/common/util.h"
 #include "../../server/common/service_registry.h"
 
 #include <cstdio>
@@ -39,6 +39,20 @@ int main() {
             "user": "video_app",
             "password": "",
             "name": "video_on_demand"
+        },
+        "auth": {
+            "enforce_gateway_identity": true
+        },
+        "transcode": {
+            "enabled": true,
+            "worker_threads": 2,
+            "poll_interval_ms": 250,
+            "lease_seconds": 120,
+            "max_attempts": 4,
+            "retry_delay_seconds": 15,
+            "ffmpeg_path": "/usr/bin/ffmpeg",
+            "upload_root": "uploads",
+            "output_root": "uploads/transcoded"
         }
     })";
     ok &= expect(biteutil::FUTIL::write(filename, valid),
@@ -52,6 +66,12 @@ int main() {
     ok &= expect(settings && settings->database.port == 3306 &&
                      settings->database.name == "video_on_demand",
                  "load database settings");
+    ok &= expect(settings && settings->auth.enforceGatewayIdentity,
+                 "load strict gateway identity setting");
+    ok &= expect(settings && settings->transcode.workerThreads == 2 &&
+                     settings->transcode.maxAttempts == 4 &&
+                     settings->transcode.ffmpegPath == "/usr/bin/ffmpeg",
+                 "load transcode worker settings");
     if (settings) {
         bitelog::bitelog_init(settings->log);
         INF("{}", "configuration integration test");

@@ -64,6 +64,8 @@ services:
       migrate:
         condition: service_completed_successfully
     command: sh -c "make transcode_service && ./transcode_service conf/transcode_service.docker.json"
+    volumes:
+      - uploads_data:/app/uploads
 
   gateway_service:
     build: .

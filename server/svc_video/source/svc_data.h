@@ -11,7 +11,7 @@ class VideoDataFacade {
 public:
     explicit VideoDataFacade(bitedb::Database& database);
 
-    std::unique_ptr<bitevideo::VideoStore> createRepository() const;
+    std::unique_ptr<bitevideo::MySqlVideoRepository> createRepository() const;
 
 private:
     bitedb::Database& database_;

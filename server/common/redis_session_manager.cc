@@ -18,6 +18,7 @@ RedisSessionManager::RedisSessionManager(
 }
 
 RedisSessionManager::~RedisSessionManager() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (context_) {
         redisFree(context_);
         context_ = nullptr;
@@ -29,6 +30,8 @@ bool RedisSessionManager::connect(std::string& error) {
     if (!settings_.enabled) {
         return true;
     }
+
+    std::lock_guard<std::mutex> lock(mutex_);
 
     context_ = redisConnect(settings_.host.c_str(), settings_.port);
     if (!context_ || context_->err) {
@@ -77,6 +80,7 @@ bool RedisSessionManager::createToken(const std::string& account,
                                       std::string& token,
                                       std::string& error) {
     error.clear();
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!enabled()) {
         token.clear();
         return true;
@@ -103,6 +107,7 @@ std::optional<std::string> RedisSessionManager::accountForToken(
     const std::string& token,
     std::string& error) {
     error.clear();
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!enabled()) {
         return std::nullopt;
     }
@@ -134,6 +139,7 @@ std::optional<std::string> RedisSessionManager::accountForToken(
 bool RedisSessionManager::deleteToken(const std::string& token,
                                       std::string& error) {
     error.clear();
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!enabled() || token.empty()) {
         return true;
     }

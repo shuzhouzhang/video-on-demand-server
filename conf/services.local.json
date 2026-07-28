@@ -3,5 +3,11 @@
   "video_service": "http://127.0.0.1:10003",
   "timeout_ms": 3000,
   "file_service": "http://127.0.0.1:10001",
-  "transcode_service": "http://127.0.0.1:10004"
+  "transcode_service": "http://127.0.0.1:10004",
+  "redis": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 6379,
+    "session_ttl_seconds": 86400
+  }
 }

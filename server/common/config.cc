@@ -107,6 +107,16 @@ std::optional<AppSettings> Config::load(const std::string& filename,
             redisSettings.sessionTtlSeconds =
                 redis["session_ttl_seconds"].asInt();
         }
+        if (!redis["profile_cache_ttl_seconds"].isNull()) {
+            if (!redis["profile_cache_ttl_seconds"].isInt() ||
+                redis["profile_cache_ttl_seconds"].asInt() < 1 ||
+                redis["profile_cache_ttl_seconds"].asInt() > 86400) {
+                error = "redis.profile_cache_ttl_seconds must be between 1 and 86400";
+                return std::nullopt;
+            }
+            redisSettings.profileCacheTtlSeconds =
+                redis["profile_cache_ttl_seconds"].asInt();
+        }
     }
 
     AuthSettings authSettings;

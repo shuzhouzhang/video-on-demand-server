@@ -40,6 +40,13 @@ int main() {
             "password": "",
             "name": "video_on_demand"
         },
+        "redis": {
+            "enabled": true,
+            "host": "127.0.0.1",
+            "port": 6379,
+            "session_ttl_seconds": 86400,
+            "profile_cache_ttl_seconds": 3600
+        },
         "auth": {
             "enforce_gateway_identity": true
         },
@@ -66,6 +73,9 @@ int main() {
     ok &= expect(settings && settings->database.port == 3306 &&
                      settings->database.name == "video_on_demand",
                  "load database settings");
+    ok &= expect(settings && settings->redis.enabled &&
+                     settings->redis.profileCacheTtlSeconds == 3600,
+                 "load user profile cache TTL");
     ok &= expect(settings && settings->auth.enforceGatewayIdentity,
                  "load strict gateway identity setting");
     ok &= expect(settings && settings->transcode.workerThreads == 2 &&
@@ -82,6 +92,23 @@ int main() {
                              std::string::npos,
                      "apply configured log path");
     }
+
+    std::string invalidCacheTtl = valid;
+    const std::string validCacheTtl =
+        "\"profile_cache_ttl_seconds\": 3600";
+    const auto cacheTtlPosition = invalidCacheTtl.find(validCacheTtl);
+    if (cacheTtlPosition != std::string::npos) {
+        invalidCacheTtl.replace(
+            cacheTtlPosition, validCacheTtl.size(),
+            "\"profile_cache_ttl_seconds\": 0");
+    }
+    ok &= expect(cacheTtlPosition != std::string::npos &&
+                     biteutil::FUTIL::write(filename, invalidCacheTtl),
+                 "write invalid profile cache TTL fixture");
+    ok &= expect(!biteconfig::Config::load(filename, error) &&
+                     error.find("profile_cache_ttl_seconds") !=
+                         std::string::npos,
+                 "reject invalid profile cache TTL");
 
     ok &= expect(biteutil::FUTIL::write(filename, "{bad json"),
                  "write invalid JSON fixture");

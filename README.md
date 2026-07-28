@@ -172,6 +172,27 @@ uploads 共享目录
 
 ## 本地构建
 
+Linux 首次运行不需要 `sudo`。下面的命令会把 MariaDB 11.4.10 和
+Redis 7.2.15 安装到当前用户的 `~/.local/opt`，数据保存在
+`~/.local/var`，随后创建业务库并执行 `migrations/001` 到 `014`：
+
+```bash
+make dev-infra-bootstrap
+```
+
+基础设施已经安装后，可分别管理和检查：
+
+```bash
+make dev-db-start
+make dev-db-migrate
+make dev-redis-start
+make dev-db-status
+make dev-redis-status
+```
+
+启动微服务（会确保 MariaDB 和 Redis 已启动，但首次仍需先执行上面的
+bootstrap 和迁移）：
+
 ```bash
 make microservices
 make dev-start-ms
@@ -180,6 +201,8 @@ make dev-smoke-ms
 make dev-smoke-write-ms
 make dev-stop-ms
 ```
+
+需要同时停止用户态基础设施时执行 `make dev-infra-stop`。
 
 默认端口：
 
@@ -247,6 +270,9 @@ curl http://127.0.0.1:10000/videos
 - 公共 data 层：将视频、用户、互动、审核、文件 DTO 从服务实现中拆出，降低服务间模型耦合。
 - svc_sync 边界：对齐参考项目的缓存删除/缓存回写结构，当前提供本地可运行实现，后续可接入 MQ/Redis 延迟同步。
 - Redis 会话管理：登录成功生成 token，Redis 保存会话，gateway 校验登录状态。
+- Redis 用户资料缓存：`user_service` 使用 cache-aside；缓存未命中读取 MySQL，
+  资料或头像更新后立即失效。基础 TTL 为 3600 秒，并增加 0 到 3600 秒随机
+  抖动，避免大量 key 同时过期。
 - Docker 部署：`docker compose up --build` 启动服务、MySQL、Redis 和数据库迁移。
 
 ## 当前边界

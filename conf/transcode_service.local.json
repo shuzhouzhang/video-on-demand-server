@@ -19,7 +19,7 @@
     "enabled": false
   },
   "auth": {
-    "enforce_gateway_identity": false
+    "enforce_gateway_identity": true
   },
   "transcode": {
     "enabled": true,

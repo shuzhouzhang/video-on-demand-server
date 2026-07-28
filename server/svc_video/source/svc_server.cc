@@ -53,7 +53,8 @@ int VideoServerBuilder::start() const {
     auto repository = data.createRepository();
     biterepo::MySqlAdminRepository adminRepository(database);
     VideoRpcService rpc(*repository, *repository, adminRepository,
-                   sessionManager.enabled() ? &sessionManager : nullptr);
+                   sessionManager.enabled() ? &sessionManager : nullptr,
+                   settings->auth.enforceGatewayIdentity);
     return rpc.listen("0.0.0.0", settings->server.port);
 }
 

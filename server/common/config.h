@@ -29,6 +29,7 @@ struct RedisSettings {
     std::uint16_t port = 6379;
     std::string password;
     int sessionTtlSeconds = 86400;
+    int profileCacheTtlSeconds = 3600;
 };
 
 struct AuthSettings {

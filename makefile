@@ -1,10 +1,11 @@
-.PHONY: server migrate microservices transcode_service test audit-routes smoke dev-start dev-stop dev-status dev-smoke dev-smoke-write dev-start-ms dev-stop-ms dev-status-ms dev-smoke-ms dev-smoke-write-ms clean
+.PHONY: server migrate microservices transcode_service test audit-routes smoke dev-start dev-stop dev-status dev-smoke dev-smoke-write dev-db-bootstrap dev-db-start dev-db-stop dev-db-status dev-db-migrate dev-redis-bootstrap dev-redis-start dev-redis-stop dev-redis-status dev-infra-bootstrap dev-infra-stop dev-start-ms dev-stop-ms dev-status-ms dev-smoke-ms dev-smoke-write-ms clean
 
 DEV_CONFIG ?= conf/server.local.json
 DEV_LOG ?= /tmp/video_server_dev.log
 GATEWAY_CONFIG ?= conf/gateway.local.json
 SERVICES_CONFIG ?= conf/services.local.json
 USER_SERVICE_CONFIG ?= conf/user_service.local.json
+DB_MIGRATION_CONFIG ?= $(USER_SERVICE_CONFIG)
 VIDEO_SERVICE_CONFIG ?= conf/video_service.local.json
 FILE_SERVICE_CONFIG ?= conf/file_service.local.json
 TRANSCODE_SERVICE_CONFIG ?= conf/transcode_service.local.json
@@ -13,6 +14,8 @@ USER_SERVICE_LOG ?= /tmp/user_service_dev.log
 VIDEO_SERVICE_LOG ?= /tmp/video_service_dev.log
 FILE_SERVICE_LOG ?= /tmp/file_service_dev.log
 TRANSCODE_SERVICE_LOG ?= /tmp/transcode_service_dev.log
+MARIADB_TOOL ?= tools/dev_mariadb.sh
+REDIS_TOOL ?= tools/dev_redis.sh
 BASE_URL ?= http://127.0.0.1:10000
 CORE_SOURCES = server/common/auth.cc server/common/email_verification.cc \
 		server/common/config.cc \
@@ -34,6 +37,7 @@ server: server/common/server_main.cc server/common/http_server.cc \
 
 user_service: server/svc_user/source/main.cc server/svc_user/source/svc_server.cc \
 		server/svc_user/source/svc_data.cc \
+		server/svc_user/source/cached_user_repository.cc \
 		server/svc_user/source/svc_rpc.cc server/svc_user/source/svc_sync.cc \
 		server/svc_user/source/svc_mq.cc server/common/http_server.cc \
 		$(CORE_SOURCES) $(USER_SOURCES)
@@ -137,11 +141,55 @@ dev-smoke-write:
 	@if ! pgrep -x video_server >/dev/null; then $(MAKE) dev-start; fi
 	@python3 tools/smoke_api.py --base-url $(BASE_URL) --write-checks
 
+# Install development infrastructure into the current user's home directory.
+dev-db-bootstrap:
+	@bash $(MARIADB_TOOL) bootstrap
+
+dev-db-start:
+	@bash $(MARIADB_TOOL) start
+
+dev-db-stop:
+	@bash $(MARIADB_TOOL) stop
+
+dev-db-status:
+	@bash $(MARIADB_TOOL) status
+
+dev-db-migrate: migrate
+	@bash $(MARIADB_TOOL) start
+	@set -e; for file in migrations/*.sql; do \
+		echo "applying $$file"; \
+		./database_migrate "$(DB_MIGRATION_CONFIG)" "$$file"; \
+	done
+
+dev-redis-bootstrap:
+	@bash $(REDIS_TOOL) bootstrap
+
+dev-redis-start:
+	@bash $(REDIS_TOOL) start
+
+dev-redis-stop:
+	@bash $(REDIS_TOOL) stop
+
+dev-redis-status:
+	@bash $(REDIS_TOOL) status
+
+dev-infra-bootstrap:
+	@$(MAKE) dev-db-bootstrap
+	@$(MAKE) dev-redis-bootstrap
+	@$(MAKE) dev-db-migrate
+	@$(MAKE) dev-redis-start
+
+dev-infra-stop:
+	@$(MAKE) dev-redis-stop
+	@$(MAKE) dev-db-stop
+
 # Compile and start the local lightweight microservice demo.
 dev-start-ms: microservices
 	@for file in "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" "$(USER_SERVICE_CONFIG)" "$(VIDEO_SERVICE_CONFIG)" "$(FILE_SERVICE_CONFIG)" "$(TRANSCODE_SERVICE_CONFIG)"; do \
 		if [ ! -f "$$file" ]; then echo "$$file not found."; exit 1; fi; \
 	done
+	@bash $(MARIADB_TOOL) start
+	@bash $(REDIS_TOOL) start
 	@$(MAKE) dev-stop-ms >/dev/null || true
 	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./user_service "$(USER_SERVICE_CONFIG)" > "$(USER_SERVICE_LOG)" 2>&1 < /dev/null
 	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./video_service "$(VIDEO_SERVICE_CONFIG)" > "$(VIDEO_SERVICE_LOG)" 2>&1 < /dev/null
@@ -164,11 +212,13 @@ dev-stop-ms:
 
 # Show whether all local microservice demo processes and health endpoints work.
 dev-status-ms:
+	@bash $(MARIADB_TOOL) status
+	@bash $(REDIS_TOOL) status
 	@pgrep -a api_gateway || { echo "api_gateway is not running"; exit 1; }
 	@pgrep -a user_service || { echo "user_service is not running"; exit 1; }
 	@pgrep -a video_service || { echo "video_service is not running"; exit 1; }
 	@pgrep -a file_service || { echo "file_service is not running"; exit 1; }
-	@pgrep -af "\./transcode_service" || { echo "transcode_service is not running"; exit 1; }
+	@pgrep -af '^\./transcode_service( |$$)' || { echo "transcode_service is not running"; exit 1; }
 	@curl -fsS "http://127.0.0.1:10000/healthz" >/dev/null && echo "api_gateway healthz ok"
 	@curl -fsS "http://127.0.0.1:10002/healthz" >/dev/null && echo "user_service healthz ok"
 	@curl -fsS "http://127.0.0.1:10003/healthz" >/dev/null && echo "video_service healthz ok"

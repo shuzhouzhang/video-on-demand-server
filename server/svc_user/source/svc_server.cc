@@ -1,4 +1,5 @@
 #include "svc_server.h"
+#include "cached_user_repository.h"
 #include "svc_data.h"
 #include "svc_rpc.h"
 #include "svc_sync.h"
@@ -50,9 +51,15 @@ int UserServerBuilder::start() const {
 
     UserDataFacade data(database);
     auto repository = data.createRepository();
+    RedisCachedUserRepository cachedRepository(*repository, settings->redis);
+    if (!cachedRepository.connect(error)) {
+        ERR("user_service profile cache connection failed: {}", error);
+        return 1;
+    }
     biterepo::MySqlAdminRepository adminRepository(database);
-    UserRpcService rpc(*repository, adminRepository,
-                   sessionManager.enabled() ? &sessionManager : nullptr);
+    UserRpcService rpc(cachedRepository, adminRepository,
+                   sessionManager.enabled() ? &sessionManager : nullptr,
+                   settings->auth.enforceGatewayIdentity);
     return rpc.listen("0.0.0.0", settings->server.port);
 }
 

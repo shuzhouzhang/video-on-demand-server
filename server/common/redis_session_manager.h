@@ -2,6 +2,7 @@
 
 #include "config.h"
 
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -31,6 +32,7 @@ public:
 private:
     biteconfig::RedisSettings settings_;
     redisContext* context_ = nullptr;
+    mutable std::mutex mutex_;
 };
 
 }  // namespace bitesession

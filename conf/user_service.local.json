@@ -16,9 +16,13 @@
     "name": "video_on_demand"
   },
   "redis": {
-    "enabled": false
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 6379,
+    "session_ttl_seconds": 86400,
+    "profile_cache_ttl_seconds": 3600
   },
   "auth": {
-    "enforce_gateway_identity": false
+    "enforce_gateway_identity": true
   }
 }

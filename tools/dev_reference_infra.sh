@@ -253,6 +253,9 @@ wait_http() {
 start() {
     mkdirs
     [[ -x "${ETCD_HOME}/etcd" ]] || bootstrap
+    # The VM/container address can change between boots. FastDFS cannot bind to
+    # loopback, so refresh its generated bind/tracker addresses on every start.
+    bootstrap_fastdfs
     start_etcd
     start_rabbitmq
     start_elasticsearch

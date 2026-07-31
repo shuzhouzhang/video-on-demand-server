@@ -2,6 +2,7 @@
 *.o
 *.a
 *.so
+/build/
 
 # Locally built test/example executables
 /example/spdlog/log-test.

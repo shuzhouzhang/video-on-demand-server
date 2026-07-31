@@ -222,7 +222,8 @@ bool forwardOverBrpc(
     }
 
     brpc::Controller controller;
-    if (request.path == "/files/upload") {
+    if (request.is_multipart_form_data() ||
+        request.path == "/files/upload") {
         controller.request_attachment().append(request.body);
     } else {
         rpcRequest.set_body(request.body);

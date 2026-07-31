@@ -217,15 +217,21 @@ void forwardToDownstream(const GatewaySettings& settings,
 
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
     if (settings.discovery.rpc.enabled && downstream.protocol == "brpc") {
+        httplib::Headers rpcHeaders = headers;
+        if (request.has_header("Content-Type")) {
+            rpcHeaders.emplace("Content-Type",
+                               request.get_header_value("Content-Type"));
+        }
         biterpc::ForwardResponse downstreamResponse;
         std::string error;
-        const bool fileOperation = request.path == "/files/upload" ||
+        const bool fileOperation = request.is_multipart_form_data() ||
+            request.path == "/files/upload" ||
             request.path.rfind("/uploads/", 0) == 0;
         const int timeoutMs = fileOperation
             ? settings.discovery.rpc.fileTimeoutMs
             : settings.discovery.rpc.timeoutMs;
         if (!biterpc::forwardOverBrpc(
-                downstream.baseUrl, timeoutMs, request, target, headers,
+                downstream.baseUrl, timeoutMs, request, target, rpcHeaders,
                 authenticatedAccount, requestId, downstreamResponse, error)) {
             Json::Value body;
             body["success"] = false;

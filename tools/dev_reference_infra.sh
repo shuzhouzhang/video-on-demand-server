@@ -71,7 +71,7 @@ bootstrap_erlang() {
         cd "${source}"
         ./configure --prefix="${ERLANG_HOME}" --without-javac --without-wx \
             --without-odbc --without-debugger --without-observer \
-            --without-et --without-megaco
+            --without-et --without-megaco --without-termcap
         make -j"${VOD_BUILD_JOBS:-2}"
         make install
     )

@@ -2,6 +2,7 @@ add_executable(user_service
     source/main.cc
     source/svc_server.cc
     source/user_repository.cc
+    source/cached_user_repository.cc
     source/svc_data.cc
     source/svc_rpc.cc
     source/svc_sync.cc
@@ -32,6 +33,9 @@ target_link_libraries(user_service PRIVATE
 )
 
 if(VOD_ENABLE_REFERENCE_RUNTIME)
-    target_sources(user_service PRIVATE ../common/etcd_registry.cc)
+    target_sources(user_service PRIVATE
+        ../common/etcd_registry.cc
+        ../common/service_registry.cc
+    )
     target_link_libraries(user_service PRIVATE vod_proto vod_reference_dependencies)
 endif()

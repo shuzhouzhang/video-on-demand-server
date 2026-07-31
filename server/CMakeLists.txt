@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
 
 option(VOD_ENABLE_REFERENCE_RUNTIME
        "Build the brpc/protobuf/etcd/RabbitMQ/FastDFS runtime adapters" ON)
@@ -15,6 +16,9 @@ if(VOD_ENABLE_REFERENCE_RUNTIME)
     find_package(Protobuf REQUIRED)
     find_package(CURL REQUIRED)
     find_library(BRPC_LIBRARY NAMES brpc REQUIRED)
+    find_library(GFLAGS_LIBRARY NAMES gflags REQUIRED)
+    find_library(LEVELDB_LIBRARY NAMES leveldb REQUIRED)
+    find_library(PROTOC_LIBRARY NAMES protoc REQUIRED)
     find_library(AMQP_CPP_LIBRARY NAMES amqpcpp REQUIRED)
     find_library(EVENT_LIBRARY NAMES event REQUIRED)
     find_library(FASTDFS_CLIENT_LIBRARY NAMES fdfsclient REQUIRED)
@@ -22,15 +26,21 @@ if(VOD_ENABLE_REFERENCE_RUNTIME)
 
     add_library(vod_reference_dependencies INTERFACE)
     target_link_libraries(vod_reference_dependencies INTERFACE
-        protobuf::libprotobuf
-        CURL::libcurl
         ${BRPC_LIBRARY}
+        ${GFLAGS_LIBRARY}
+        protobuf::libprotobuf
+        ${LEVELDB_LIBRARY}
+        ${PROTOC_LIBRARY}
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        ${CMAKE_DL_LIBS}
+        ZLIB::ZLIB
+        rt
+        CURL::libcurl
         ${AMQP_CPP_LIBRARY}
         ${EVENT_LIBRARY}
         ${FASTDFS_CLIENT_LIBRARY}
         ${FASTCOMMON_LIBRARY}
-        OpenSSL::SSL
-        OpenSSL::Crypto
     )
     target_compile_definitions(vod_reference_dependencies INTERFACE
         VOD_ENABLE_REFERENCE_RUNTIME=1

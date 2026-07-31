@@ -29,6 +29,8 @@ if(VOD_ENABLE_REFERENCE_RUNTIME)
         ${EVENT_LIBRARY}
         ${FASTDFS_CLIENT_LIBRARY}
         ${FASTCOMMON_LIBRARY}
+        OpenSSL::SSL
+        OpenSSL::Crypto
     )
     target_compile_definitions(vod_reference_dependencies INTERFACE
         VOD_ENABLE_REFERENCE_RUNTIME=1

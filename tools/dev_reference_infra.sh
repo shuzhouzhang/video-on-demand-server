@@ -48,7 +48,7 @@ bootstrap_etcd() {
         return
     fi
     local archive="${DOWNLOAD_DIR}/etcd-v${ETCD_VERSION}-linux-amd64.tar.gz"
-    download "https://github.com/etcd-io/etcd/releases/download/v${ETCD_VERSION}/etcd-v${ETCD_VERSION}-linux-amd64.tar.gz" "${archive}"
+    download "https://storage.googleapis.com/etcd/v${ETCD_VERSION}/etcd-v${ETCD_VERSION}-linux-amd64.tar.gz" "${archive}"
     rm -rf "${ETCD_HOME}.tmp"
     mkdir -p "${ETCD_HOME}.tmp"
     tar -xzf "${archive}" -C "${ETCD_HOME}.tmp" --strip-components=1

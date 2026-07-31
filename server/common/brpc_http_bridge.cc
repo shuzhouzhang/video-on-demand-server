@@ -56,6 +56,42 @@ std::string brpcAddress(std::string endpoint) {
     return endpoint;
 }
 
+std::string multipartBoundary(const httplib::Request& request) {
+    const std::string contentType = request.get_header_value("Content-Type");
+    const std::string marker = "boundary=";
+    const auto position = contentType.find(marker);
+    if (position == std::string::npos) return "";
+    std::string boundary = contentType.substr(position + marker.size());
+    const auto separator = boundary.find(';');
+    if (separator != std::string::npos) boundary.resize(separator);
+    if (boundary.size() >= 2 && boundary.front() == '"' &&
+        boundary.back() == '"') {
+        boundary = boundary.substr(1, boundary.size() - 2);
+    }
+    return boundary;
+}
+
+std::string rebuildMultipartBody(const httplib::Request& request) {
+    const std::string boundary = multipartBoundary(request);
+    if (boundary.empty()) return request.body;
+    std::string body;
+    for (const auto& entry : request.files) {
+        const auto& item = entry.second;
+        body += "--" + boundary + "\r\n";
+        body += "Content-Disposition: form-data; name=\"" + entry.first + "\"";
+        if (!item.filename.empty()) {
+            body += "; filename=\"" + item.filename + "\"";
+        }
+        body += "\r\n";
+        if (!item.content_type.empty()) {
+            body += "Content-Type: " + item.content_type + "\r\n";
+        }
+        body += "\r\n" + item.content + "\r\n";
+    }
+    body += "--" + boundary + "--\r\n";
+    return body;
+}
+
 bool useAttachment(const std::string& contentType) {
     return contentType.rfind("application/json", 0) != 0 &&
            contentType.rfind("text/", 0) != 0;
@@ -222,9 +258,10 @@ bool forwardOverBrpc(
     }
 
     brpc::Controller controller;
-    if (request.is_multipart_form_data() ||
-        request.path == "/files/upload") {
-        controller.request_attachment().append(request.body);
+    if (request.is_multipart_form_data() || request.path == "/files/upload") {
+        const std::string body = request.is_multipart_form_data()
+            ? rebuildMultipartBody(request) : request.body;
+        controller.request_attachment().append(body);
     } else {
         rpcRequest.set_body(request.body);
     }

@@ -143,7 +143,10 @@ def run_write_checks(
             },
             token,
         )
-        expect(isinstance(upload, dict) and upload.get("success") is True, "POST /videos/upload accepts video bytes")
+        expect(
+            isinstance(upload, dict) and upload.get("success") is True,
+            f"POST /videos/upload accepts video bytes; response={upload}",
+        )
         video = upload.get("video", {})
         uploaded_video_id = video.get("id", "")
         stored_video_path = video.get("storedVideoPath", "")
@@ -217,13 +220,14 @@ def run_write_checks(
             "avatarPath": avatar_path,
             "previousAvatarPath": previous_avatar_path,
         }
-        cleanup = request_json(
-            base_url, "POST", "/__smoke-cleanup", cleanup_payload, token=token
-        )
-        if isinstance(cleanup, dict) and cleanup.get("success") is True:
-            print("[PASS] smoke write-check data cleaned")
-        else:
-            print(f"[WARN] cleanup did not complete: {cleanup}", file=sys.stderr)
+        if uploaded_video_id or avatar_path:
+            cleanup = request_json(
+                base_url, "POST", "/__smoke-cleanup", cleanup_payload, token=token
+            )
+            if isinstance(cleanup, dict) and cleanup.get("success") is True:
+                print("[PASS] smoke write-check data cleaned")
+            else:
+                print(f"[WARN] cleanup did not complete: {cleanup}", file=sys.stderr)
 
 
 def main() -> int:

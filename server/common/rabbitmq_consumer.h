@@ -38,7 +38,6 @@ public:
 private:
     void run();
     bool loadPassword(std::string& password, std::string& error) const;
-    std::string address(const std::string& password) const;
 
     biteconfig::RabbitMqSettings settings_;
     std::string exchange_;

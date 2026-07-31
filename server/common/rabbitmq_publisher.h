@@ -14,7 +14,6 @@ public:
 
 private:
     bool loadPassword(std::string& password, std::string& error) const;
-    std::string address(const std::string& password) const;
 
     biteconfig::RabbitMqSettings settings_;
 };

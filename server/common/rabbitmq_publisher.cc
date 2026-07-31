@@ -9,7 +9,6 @@
 #include <event2/event.h>
 
 #include <algorithm>
-#include <cctype>
 #include <cstdint>
 #include <fstream>
 #include <memory>
@@ -26,23 +25,6 @@ std::string trim(std::string value) {
     }
     const auto first = value.find_first_not_of(" \t\r\n");
     return first == std::string::npos ? "" : value.substr(first);
-}
-
-std::string percentEncode(const std::string& value) {
-    static constexpr char digits[] = "0123456789ABCDEF";
-    std::string encoded;
-    for (unsigned char byte : value) {
-        const bool safe = std::isalnum(byte) || byte == '-' || byte == '_' ||
-            byte == '.' || byte == '~';
-        if (safe) {
-            encoded.push_back(static_cast<char>(byte));
-        } else {
-            encoded.push_back('%');
-            encoded.push_back(digits[byte >> 4]);
-            encoded.push_back(digits[byte & 0x0f]);
-        }
-    }
-    return encoded;
 }
 
 std::string queueFor(const OutboxEvent& event) {
@@ -82,13 +64,6 @@ bool RabbitMqPublisher::loadPassword(std::string& password,
     return true;
 }
 
-std::string RabbitMqPublisher::address(const std::string& password) const {
-    return "amqp://" + percentEncode(settings_.user) + ":" +
-        percentEncode(password) + "@" + settings_.host + ":" +
-        std::to_string(settings_.port) + "/" +
-        percentEncode(settings_.virtualHost);
-}
-
 bool RabbitMqPublisher::publish(const OutboxEvent& outbox,
                                 std::string& error) {
     std::string password;
@@ -104,7 +79,12 @@ bool RabbitMqPublisher::publish(const OutboxEvent& outbox,
     bool finished = false;
     bool confirmed = false;
     AMQP::LibEventHandler handler(loop.get());
-    AMQP::TcpConnection connection(&handler, AMQP::Address(address(password)));
+    AMQP::TcpConnection connection(
+        &handler,
+        AMQP::Address(settings_.host,
+                      static_cast<std::uint16_t>(settings_.port),
+                      AMQP::Login(settings_.user, password),
+                      settings_.virtualHost));
     AMQP::TcpChannel channel(&connection);
     AMQP::Reliable<> reliable(channel);
 

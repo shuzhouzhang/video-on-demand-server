@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cctype>
 #include <cstdint>
 #include <future>
 #include <iostream>
@@ -29,22 +28,6 @@ std::string trim(std::string value) {
     }
     const auto first = value.find_first_not_of(" \t\r\n");
     return first == std::string::npos ? "" : value.substr(first);
-}
-
-std::string percentEncode(const std::string& value) {
-    static constexpr char digits[] = "0123456789ABCDEF";
-    std::string encoded;
-    for (unsigned char byte : value) {
-        if (std::isalnum(byte) || byte == '-' || byte == '_' || byte == '.' ||
-            byte == '~') {
-            encoded.push_back(static_cast<char>(byte));
-        } else {
-            encoded.push_back('%');
-            encoded.push_back(digits[byte >> 4]);
-            encoded.push_back(digits[byte & 0x0f]);
-        }
-    }
-    return encoded;
 }
 
 struct HandlerResult {
@@ -127,13 +110,6 @@ bool RabbitMqConsumer::loadPassword(std::string& password,
     return true;
 }
 
-std::string RabbitMqConsumer::address(const std::string& password) const {
-    return "amqp://" + percentEncode(settings_.user) + ":" +
-        percentEncode(password) + "@" + settings_.host + ":" +
-        std::to_string(settings_.port) + "/" +
-        percentEncode(settings_.virtualHost);
-}
-
 void RabbitMqConsumer::start() {
     bool expected = true;
     if (!stopped_.compare_exchange_strong(expected, false)) return;
@@ -164,7 +140,11 @@ void RabbitMqConsumer::run() {
 
         AMQP::LibEventHandler eventHandler(loop.get());
         AMQP::TcpConnection connection(
-            &eventHandler, AMQP::Address(address(password)));
+            &eventHandler,
+            AMQP::Address(settings_.host,
+                          static_cast<std::uint16_t>(settings_.port),
+                          AMQP::Login(settings_.user, password),
+                          settings_.virtualHost));
         AMQP::TcpChannel channel(&connection);
         SessionState state;
         state.loop = loop.get();

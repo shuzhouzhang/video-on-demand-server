@@ -8,6 +8,7 @@
 #include "../../common/util.h"
 
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
+#include "../../common/brpc_http_bridge.h"
 #include "../../common/etcd_registry.h"
 #endif
 
@@ -213,6 +214,42 @@ void forwardToDownstream(const GatewaySettings& settings,
         setJsonResponse(response, 405, body);
         return;
     }
+
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    if (settings.discovery.rpc.enabled && downstream.protocol == "brpc") {
+        biterpc::ForwardResponse downstreamResponse;
+        std::string error;
+        const bool fileOperation = request.path == "/files/upload" ||
+            request.path.rfind("/uploads/", 0) == 0;
+        const int timeoutMs = fileOperation
+            ? settings.discovery.rpc.fileTimeoutMs
+            : settings.discovery.rpc.timeoutMs;
+        if (!biterpc::forwardOverBrpc(
+                downstream.baseUrl, timeoutMs, request, target, headers,
+                authenticatedAccount, requestId, downstreamResponse, error)) {
+            Json::Value body;
+            body["success"] = false;
+            const bool timedOut = error.find("timeout") != std::string::npos ||
+                error.find("timed out") != std::string::npos;
+            body["message"] = timedOut ? "downstream service timeout"
+                                        : "downstream service unavailable";
+            logGatewayError(requestId, request.path, downstream,
+                            downstream.baseUrl, error);
+            setJsonResponse(response, timedOut ? 504 : 503, body);
+            response.set_header("X-Request-Id", requestId);
+            return;
+        }
+        response.status = downstreamResponse.status;
+        response.headers = downstreamResponse.headers;
+        response.set_header("X-Request-Id", requestId);
+        response.set_content(
+            downstreamResponse.body,
+            downstreamResponse.contentType.empty()
+                ? "application/octet-stream"
+                : downstreamResponse.contentType.c_str());
+        return;
+    }
+#endif
 
     bitehttp::DownstreamResponse downstreamResponse;
     std::string error;

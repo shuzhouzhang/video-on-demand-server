@@ -25,6 +25,7 @@ if(VOD_ENABLE_REFERENCE_RUNTIME)
     target_sources(file_service PRIVATE
         ../common/etcd_registry.cc
         ../common/service_registry.cc
+        ../common/brpc_http_bridge.cc
     )
     target_link_libraries(file_service PRIVATE vod_proto vod_reference_dependencies)
 endif()

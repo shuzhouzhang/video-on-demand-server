@@ -53,6 +53,7 @@ int main() {
         "rpc": {
             "enabled": true,
             "bind_host": "127.0.0.1",
+            "port": 11002,
             "timeout_ms": 2000,
             "file_timeout_ms": 120000
         },
@@ -113,6 +114,7 @@ int main() {
     ok &= expect(settings && settings->auth.enforceGatewayIdentity,
                  "load strict gateway identity setting");
     ok &= expect(settings && settings->rpc.enabled &&
+                     settings->rpc.port == 11002 &&
                      settings->rpc.timeoutMs == 2000 &&
                      settings->registry.enabled &&
                      settings->registry.leaseTtlSeconds == 10 &&

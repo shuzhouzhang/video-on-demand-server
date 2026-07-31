@@ -19,6 +19,7 @@
   "rpc": {
     "enabled": true,
     "bind_host": "127.0.0.1",
+    "port": 11001,
     "timeout_ms": 2000,
     "file_timeout_ms": 120000
   },

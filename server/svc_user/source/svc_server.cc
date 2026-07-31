@@ -8,6 +8,7 @@
 #include "../../common/config.h"
 #include "../../common/redis_session_manager.h"
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
+#include "../../common/brpc_http_bridge.h"
 #include "../../common/etcd_registry.h"
 #endif
 #include "../../database/database.h"
@@ -36,13 +37,26 @@ int UserServerBuilder::start() const {
     bitelog::bitelog_init(settings->log);
 
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<biterpc::BrpcHttpBridge> rpcBridge;
+    if (settings->rpc.enabled) {
+        rpcBridge = std::make_unique<biterpc::BrpcHttpBridge>(
+            "http://127.0.0.1:" + std::to_string(settings->server.port),
+            settings->rpc.timeoutMs);
+        if (!rpcBridge->start(settings->rpc.bindHost, settings->rpc.port,
+                              error)) {
+            ERR("user_service brpc startup failed: {}", error);
+            return 1;
+        }
+    }
     std::unique_ptr<bitesvc::EtcdServiceProvider> serviceProvider;
     if (settings->registry.enabled) {
         bitesvc::ServiceEndpoint endpoint{
             "user_service",
-            "http://127.0.0.1:" + std::to_string(settings->server.port),
+            "http://127.0.0.1:" + std::to_string(
+                settings->rpc.enabled ? settings->rpc.port
+                                      : settings->server.port),
             "",
-            "http"};
+            settings->rpc.enabled ? "brpc" : "http"};
         serviceProvider = std::make_unique<bitesvc::EtcdServiceProvider>(
             settings->registry, "user_service", std::move(endpoint));
         if (!serviceProvider->start(error)) {
@@ -80,7 +94,8 @@ int UserServerBuilder::start() const {
     UserRpcService rpc(cachedRepository, adminRepository,
                    sessionManager.enabled() ? &sessionManager : nullptr,
                    settings->auth.enforceGatewayIdentity);
-    return rpc.listen("0.0.0.0", settings->server.port);
+    return rpc.listen(settings->rpc.enabled ? "127.0.0.1" : "0.0.0.0",
+                      settings->server.port);
 }
 
 }  // namespace svc_user

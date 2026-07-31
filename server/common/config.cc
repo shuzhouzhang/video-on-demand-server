@@ -191,9 +191,11 @@ std::optional<AppSettings> Config::load(const std::string& filename,
 
     RpcSettings rpcSettings;
     const Json::Value& rpc = (*root)["rpc"];
+    int rpcPort = rpcSettings.port;
     if (!requireObjectOrNull(rpc, "rpc", error) ||
         !readOptionalBool(rpc, "enabled", rpcSettings.enabled, error, "rpc") ||
         !readOptionalString(rpc, "bind_host", rpcSettings.bindHost, error, "rpc") ||
+        !readOptionalPositiveInt(rpc, "port", rpcPort, 65535, error, "rpc") ||
         !readOptionalPositiveInt(rpc, "timeout_ms", rpcSettings.timeoutMs,
                                  60000, error, "rpc") ||
         !readOptionalPositiveInt(rpc, "file_timeout_ms",
@@ -201,6 +203,7 @@ std::optional<AppSettings> Config::load(const std::string& filename,
                                  error, "rpc")) {
         return std::nullopt;
     }
+    rpcSettings.port = rpcPort;
 
     RegistrySettings registrySettings;
     const Json::Value& registry = (*root)["registry"];

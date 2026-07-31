@@ -22,6 +22,9 @@ target_link_libraries(api_gateway PRIVATE
 )
 
 if(VOD_ENABLE_REFERENCE_RUNTIME)
-    target_sources(api_gateway PRIVATE ../common/etcd_registry.cc)
+    target_sources(api_gateway PRIVATE
+        ../common/etcd_registry.cc
+        ../common/brpc_http_bridge.cc
+    )
     target_link_libraries(api_gateway PRIVATE vod_proto vod_reference_dependencies)
 endif()

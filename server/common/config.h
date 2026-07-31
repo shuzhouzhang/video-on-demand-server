@@ -39,6 +39,7 @@ struct AuthSettings {
 struct RpcSettings {
     bool enabled = false;
     std::string bindHost = "127.0.0.1";
+    int port = 0;
     int timeoutMs = 2000;
     int fileTimeoutMs = 120000;
 };

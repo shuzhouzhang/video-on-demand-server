@@ -34,6 +34,7 @@ if(VOD_ENABLE_REFERENCE_RUNTIME)
     target_sources(video_service PRIVATE
         ../common/etcd_registry.cc
         ../common/service_registry.cc
+        ../common/brpc_http_bridge.cc
         ../common/elasticsearch.cc
     )
     target_link_libraries(video_service PRIVATE vod_proto vod_reference_dependencies)

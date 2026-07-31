@@ -29,8 +29,8 @@ namespace fs = std::filesystem;
 
 std::string safeSegment(std::string value) {
     for (char& character : value) {
-        const unsigned char byte = static_cast<unsigned char>(character);
-        if (!std::isalnum(byte) && character != '-' && character != '_' &&
+        const unsigned char codeUnit = static_cast<unsigned char>(character);
+        if (!std::isalnum(codeUnit) && character != '-' && character != '_' &&
             character != '.') {
             character = '_';
         }

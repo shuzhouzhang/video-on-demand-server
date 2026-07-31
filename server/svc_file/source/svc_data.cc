@@ -13,8 +13,11 @@ std::string pathFileName(const std::string& filename) {
 namespace svc_file {
 
 FileDataFacade::FileDataFacade(bitestorage::IObjectStorage& storage,
-                               std::string publicPathPrefix)
-    : storage_(storage), publicPathPrefix_(std::move(publicPathPrefix)) {
+                               std::string publicPathPrefix,
+                               bitestorage::IObjectStorage* legacyStorage)
+    : storage_(storage),
+      legacyStorage_(legacyStorage),
+      publicPathPrefix_(std::move(publicPathPrefix)) {
     while (publicPathPrefix_.size() > 1 && publicPathPrefix_.back() == '/') {
         publicPathPrefix_.pop_back();
     }
@@ -53,6 +56,11 @@ bool FileDataFacade::downloadStoredFile(const std::string& locator,
         locator.front() == '/') {
         error = "invalid object locator";
         return false;
+    }
+    const bool fastDfsLocator = locator.rfind("group", 0) == 0 &&
+        locator.find("/M") != std::string::npos;
+    if (!fastDfsLocator && legacyStorage_) {
+        return legacyStorage_->get(locator, content, error);
     }
     return storage_.get(locator, content, error);
 }

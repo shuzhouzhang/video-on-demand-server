@@ -19,7 +19,8 @@ struct StoredFile {
 class FileDataFacade {
 public:
     FileDataFacade(bitestorage::IObjectStorage& storage,
-                   std::string publicPathPrefix);
+                   std::string publicPathPrefix,
+                   bitestorage::IObjectStorage* legacyStorage = nullptr);
 
     bool storeUploadedFile(const std::string& directory,
                            const std::string& filename,
@@ -36,6 +37,7 @@ public:
 
 private:
     bitestorage::IObjectStorage& storage_;
+    bitestorage::IObjectStorage* legacyStorage_;
     std::string publicPathPrefix_;
 };
 

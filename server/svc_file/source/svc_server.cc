@@ -170,15 +170,17 @@ int FileServerBuilder::start() const {
     (void)cacheDelete;
 
     std::unique_ptr<bitestorage::IObjectStorage> storage;
+    std::unique_ptr<bitestorage::IObjectStorage> legacyStorage;
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
     if (settings->fastdfs.enabled) {
         storage = bitestorage::makeFastDfsObjectStorage(settings->fastdfs);
+        legacyStorage = bitestorage::makeLocalObjectStorage("uploads");
     }
 #endif
     if (!storage) storage = bitestorage::makeLocalObjectStorage("uploads");
     const std::string publicPrefix = settings->fastdfs.publicPathPrefix.empty()
         ? "/uploads" : settings->fastdfs.publicPathPrefix;
-    FileDataFacade data(*storage, publicPrefix);
+    FileDataFacade data(*storage, publicPrefix, legacyStorage.get());
     registerRoutes(server, data, !settings->fastdfs.enabled);
 
     const char* httpHost = settings->rpc.enabled ? "127.0.0.1" : "0.0.0.0";

@@ -110,19 +110,25 @@ bootstrap_fastdfs() {
     [[ -r /etc/fdfs/storage.conf ]] || { echo "/etc/fdfs/storage.conf is missing" >&2; return 1; }
     [[ -r /etc/fdfs/client.conf ]] || { echo "/etc/fdfs/client.conf is missing" >&2; return 1; }
 
-    mkdir -p "${FASTDFS_HOME}/conf" "${DATA_DIR}/fastdfs/tracker" \
-        "${DATA_DIR}/fastdfs/storage" "${DATA_DIR}/fastdfs/files"
+    mkdir -p "${FASTDFS_HOME}/conf" "${DATA_DIR}/fastdfs/client" \
+        "${DATA_DIR}/fastdfs/tracker" "${DATA_DIR}/fastdfs/storage" \
+        "${DATA_DIR}/fastdfs/files"
     cp /etc/fdfs/tracker.conf "${FASTDFS_HOME}/conf/tracker.conf"
     cp /etc/fdfs/storage.conf "${FASTDFS_HOME}/conf/storage.conf"
     cp /etc/fdfs/client.conf "${FASTDFS_HOME}/conf/client.conf"
-    sed -i "s#^base_path=.*#base_path=${DATA_DIR}/fastdfs/tracker#" \
+    sed -E -i "s#^[[:space:]]*base_path[[:space:]]*=.*#base_path = ${DATA_DIR}/fastdfs/tracker#" \
         "${FASTDFS_HOME}/conf/tracker.conf"
-    sed -i "s#^base_path=.*#base_path=${DATA_DIR}/fastdfs/storage#" \
+    sed -E -i "s#^[[:space:]]*base_path[[:space:]]*=.*#base_path = ${DATA_DIR}/fastdfs/storage#" \
         "${FASTDFS_HOME}/conf/storage.conf"
-    sed -i "s#^store_path0=.*#store_path0=${DATA_DIR}/fastdfs/files#" \
+    sed -E -i "s#^[[:space:]]*store_path0[[:space:]]*=.*#store_path0 = ${DATA_DIR}/fastdfs/files#" \
         "${FASTDFS_HOME}/conf/storage.conf"
-    sed -i "s#^tracker_server=.*#tracker_server=127.0.0.1:22122#" \
-        "${FASTDFS_HOME}/conf/storage.conf" "${FASTDFS_HOME}/conf/client.conf"
+    sed -E -i "s#^[[:space:]]*base_path[[:space:]]*=.*#base_path = ${DATA_DIR}/fastdfs/client#" \
+        "${FASTDFS_HOME}/conf/client.conf"
+    for config in "${FASTDFS_HOME}/conf/storage.conf" \
+                  "${FASTDFS_HOME}/conf/client.conf"; do
+        sed -E -i '/^[[:space:]]*tracker_server[[:space:]]*=/d' "${config}"
+        printf '\ntracker_server = 127.0.0.1:22122\n' >>"${config}"
+    done
 }
 
 bootstrap() {

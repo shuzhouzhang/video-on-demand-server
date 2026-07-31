@@ -18,6 +18,7 @@ MARIADB_TOOL ?= tools/dev_mariadb.sh
 REDIS_TOOL ?= tools/dev_redis.sh
 REFERENCE_INFRA_TOOL ?= tools/dev_reference_infra.sh
 CMAKE_BUILD_DIR ?= build/reference-runtime
+CMAKE_BUILD_JOBS ?= 2
 API_GATEWAY_BIN ?= $(CMAKE_BUILD_DIR)/svc_gateway/api_gateway
 USER_SERVICE_BIN ?= $(CMAKE_BUILD_DIR)/svc_user/user_service
 VIDEO_SERVICE_BIN ?= $(CMAKE_BUILD_DIR)/svc_video/video_service
@@ -100,7 +101,7 @@ cmake-configure:
 	cmake -S server -B $(CMAKE_BUILD_DIR) -DCMAKE_BUILD_TYPE=RelWithDebInfo -DVOD_ENABLE_REFERENCE_RUNTIME=ON
 
 cmake-build: cmake-configure
-	cmake --build $(CMAKE_BUILD_DIR) --parallel
+	cmake --build $(CMAKE_BUILD_DIR) --parallel $(CMAKE_BUILD_JOBS)
 
 reference-infra-bootstrap:
 	@bash $(REFERENCE_INFRA_TOOL) bootstrap
@@ -250,11 +251,11 @@ dev-status-ms:
 	@pgrep -a video_service || { echo "video_service is not running"; exit 1; }
 	@pgrep -a file_service || { echo "file_service is not running"; exit 1; }
 	@pgrep -af '/svc_transcode/transcode_service( |$$)' || { echo "transcode_service is not running"; exit 1; }
-	@curl -fsS "http://127.0.0.1:10000/healthz" >/dev/null && echo "api_gateway healthz ok"
-	@curl -fsS "http://127.0.0.1:10002/healthz" >/dev/null && echo "user_service healthz ok"
-	@curl -fsS "http://127.0.0.1:10003/healthz" >/dev/null && echo "video_service healthz ok"
-	@curl -fsS "http://127.0.0.1:10001/healthz" >/dev/null && echo "file_service healthz ok"
-	@curl -fsS "http://127.0.0.1:10004/healthz" >/dev/null && echo "transcode_service healthz ok"
+	@curl --max-time 3 -fsS "http://127.0.0.1:10000/healthz" >/dev/null && echo "api_gateway healthz ok"
+	@curl --max-time 3 -fsS "http://127.0.0.1:10002/healthz" >/dev/null && echo "user_service healthz ok"
+	@curl --max-time 3 -fsS "http://127.0.0.1:10003/healthz" >/dev/null && echo "video_service healthz ok"
+	@curl --max-time 3 -fsS "http://127.0.0.1:10001/healthz" >/dev/null && echo "file_service healthz ok"
+	@curl --max-time 3 -fsS "http://127.0.0.1:10004/healthz" >/dev/null && echo "transcode_service healthz ok"
 
 dev-smoke-ms:
 	@if ! pgrep -x api_gateway >/dev/null; then $(MAKE) dev-start-ms; fi

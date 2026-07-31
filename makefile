@@ -227,9 +227,24 @@ dev-start-ms: microservices
 	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f "$(VIDEO_SERVICE_BIN)" "$(VIDEO_SERVICE_CONFIG)" > "$(VIDEO_SERVICE_LOG)" 2>&1 < /dev/null
 	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f "$(FILE_SERVICE_BIN)" "$(FILE_SERVICE_CONFIG)" > "$(FILE_SERVICE_LOG)" 2>&1 < /dev/null
 	@setsid -f "$(TRANSCODE_SERVICE_BIN)" "$(TRANSCODE_SERVICE_CONFIG)" > "$(TRANSCODE_SERVICE_LOG)" 2>&1 < /dev/null
-	@sleep 1
+	@for url in \
+		"http://127.0.0.1:10001/healthz" \
+		"http://127.0.0.1:10002/healthz" \
+		"http://127.0.0.1:10003/healthz" \
+		"http://127.0.0.1:10004/healthz"; do \
+		ready=0; \
+		for attempt in $$(seq 1 20); do \
+			if curl --max-time 1 -fsS "$$url" >/dev/null; then ready=1; break; fi; \
+			sleep 0.5; \
+		done; \
+		if [ "$$ready" -ne 1 ]; then echo "service did not become healthy: $$url"; exit 1; fi; \
+	done
 	@setsid -f "$(API_GATEWAY_BIN)" "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" > "$(GATEWAY_LOG)" 2>&1 < /dev/null
-	@sleep 1
+	@ready=0; for attempt in $$(seq 1 20); do \
+		if curl --max-time 1 -fsS "http://127.0.0.1:10000/healthz" >/dev/null; then ready=1; break; fi; \
+		sleep 0.5; \
+	done; \
+	if [ "$$ready" -ne 1 ]; then echo "api_gateway did not become healthy"; exit 1; fi
 	@$(MAKE) dev-status-ms
 
 # Stop the local lightweight microservice demo.
@@ -238,7 +253,7 @@ dev-stop-ms:
 	@pkill -x user_service 2>/dev/null || true
 	@pkill -x video_service 2>/dev/null || true
 	@pkill -x file_service 2>/dev/null || true
-	@pkill -f '/svc_transcode/transcode_service ' 2>/dev/null || true
+	@pkill -f '/svc_transcode/[t]ranscode_service( |$$)' 2>/dev/null || true
 	@pkill -f '^\./interaction_service ' 2>/dev/null || true
 	@echo "microservices stopped"
 

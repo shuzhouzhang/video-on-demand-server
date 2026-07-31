@@ -25,7 +25,9 @@ gateway_service :10000
     |
     +--------------------+--------------------+--------------------+
     |                    |                    |
-user_service :10002  video_service :10003  file_service :10001
+brpc/protobuf        brpc/protobuf        brpc attachment
+    |                    |                    |
+user_service :11002  video_service :11003  file_service :11001
     |                    |                    |
 UserRepository       VideoRepository       FileRepository
     |                    |                    |
@@ -50,7 +52,7 @@ video_server
 - `user_service`：用户登录、邮箱验证码登录、退出登录、用户资料、头像资料更新、后台用户管理。
 - `video_service`：视频元数据、列表、详情、搜索、播放地址、点赞、收藏、评论、弹幕、观看进度、审核。
 - `file_service`：文件服务入口，提供 `/uploads/...` 下载和 `POST /files/upload` 通用文件上传；现有 `/videos/upload`、`/users/avatar` 为兼容 Qt 客户端仍保留原路径。
-- `transcode_service`：MySQL 持久化异步转码服务。视频上传与任务创建处于同一事务；worker 通过数据库租约原子领取任务，使用 FFmpeg 生成 H.264/AAC MP4，支持失败重试、进程重启恢复和状态查询，不依赖 MQ。
+- `transcode_service`：MySQL 持久化异步转码服务。任务与 RabbitMQ outbox 事件在同一事务写入；发布器使用 confirm 重试。迁移期间原数据库租约 worker 仍保留，直到 MQ 消费链路完成同等 E2E 验证。
 - `common`：JSON、日志、配置、HTTP Client、ServiceRegistry、RedisSessionManager、CacheSync 同步接口等公共能力。
 - `data`：用户、视频、互动、审核、文件等跨服务领域模型。
 - `database`：MySQL 连接和迁移工具。
@@ -174,7 +176,7 @@ uploads 共享目录
 
 Linux 首次运行不需要 `sudo`。下面的命令会把 MariaDB 11.4.10 和
 Redis 7.2.15 安装到当前用户的 `~/.local/opt`，数据保存在
-`~/.local/var`，随后创建业务库并执行 `migrations/001` 到 `014`：
+`~/.local/var`，随后创建业务库并执行 `migrations/001` 到 `015`：
 
 ```bash
 make dev-infra-bootstrap
@@ -212,6 +214,65 @@ file_service     10001
 user_service     10002
 video_service    10003
 transcode_service 10004
+internal brpc    11001-11004
+```
+
+## Reference runtime（单机）
+
+CMake 是 reference runtime 的正式构建入口，Makefile 只提供快捷包装：
+
+```bash
+make cmake-configure
+make cmake-build CMAKE_BUILD_JOBS=2
+```
+
+固定依赖全部安装在当前用户目录 `/home/dev/.local/opt/vod`，不需要
+sudo：
+
+- etcd 3.7.1：服务租约注册与 Gateway 实例刷新。
+- Erlang/OTP 27.3 + RabbitMQ 4.3.4：持久化事件和 publisher confirm。
+- Elasticsearch 9.4.2：`vod_videos_v1` 索引和 `vod_videos` 别名。
+- FastDFS：一个 tracker、一个 storage，复用系统已安装客户端。
+
+```bash
+make reference-infra-bootstrap
+make reference-infra-start
+make reference-infra-status
+make reference-infra-stop
+```
+
+启动顺序为 etcd → RabbitMQ → Elasticsearch → FastDFS → MariaDB/Redis →
+业务服务 → Gateway。业务服务的 HTTP 应用层只监听 `127.0.0.1`，Gateway
+通过 etcd 获取 11001–11004 的 brpc 实例。迁移期未强类型化的旧路由通过
+`runtime.proto/InternalHttpService` 承载 protobuf RPC；文件上传和二进制下载
+使用 brpc attachment，不把大文件放进 protobuf `bytes`。
+
+基础设施端口：
+
+```text
+etcd client/peer       2379 / 2380 (127.0.0.1)
+RabbitMQ AMQP          5672 (127.0.0.1)
+Elasticsearch HTTP     9200 (127.0.0.1, 512 MB heap)
+FastDFS tracker/storage 22122 / 23000
+```
+
+FastDFS 6.12.x 拒绝 loopback tracker 地址，因此脚本会选择容器或 VM 的第一个
+非 loopback 内部地址，并将 tracker/storage 的 `bind_addr` 绑定到该地址；
+`allow_hosts` 只保留 `127.0.0.1` 和这个内部地址。地址选择不正确时可显式设置
+`VOD_FASTDFS_HOST` 后重新执行 bootstrap。
+
+真实 RabbitMQ 密码只保存在
+`/home/dev/.local/opt/vod/secrets/rabbitmq_password`，仓库配置仅提交
+`password_file` 路径。ES 若记录 `vm.max_map_count` 警告但单节点健康检查为
+green，可以用于本地闭环；生产部署仍必须由管理员调整系统参数。
+
+常用排查：
+
+```bash
+bash tools/dev_reference_infra.sh status
+tail -n 100 /home/dev/.local/opt/vod/logs/etcd.log
+tail -n 100 /home/dev/.local/opt/vod/logs/elasticsearch/vod-dev.log
+tail -n 100 /home/dev/.local/opt/vod/data/fastdfs/storage/logs/storaged.log
 ```
 
 接口覆盖检查：

@@ -43,6 +43,7 @@
     "port": 5672,
     "user": "video_app",
     "password": "",
+    "password_file": "/home/dev/.local/opt/vod/secrets/rabbitmq_password",
     "virtual_host": "/vod",
     "max_attempts": 3
   },

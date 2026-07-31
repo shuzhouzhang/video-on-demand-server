@@ -11,13 +11,15 @@ class VideoDataFacade {
 public:
     explicit VideoDataFacade(
         bitedb::Database& database,
-        bitesearch::IVideoSearchIndex* searchIndex = nullptr);
+        bitesearch::IVideoSearchIndex* searchIndex = nullptr,
+        biteevent::MySqlOutboxRepository* outbox = nullptr);
 
     std::unique_ptr<bitevideo::MySqlVideoRepository> createRepository() const;
 
 private:
     bitedb::Database& database_;
     bitesearch::IVideoSearchIndex* searchIndex_;
+    biteevent::MySqlOutboxRepository* outbox_;
 };
 
 }  // namespace svc_video

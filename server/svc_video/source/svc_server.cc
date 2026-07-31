@@ -6,6 +6,7 @@
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
 #include "../../common/elasticsearch.h"
+#include "../../common/outbox.h"
 #include "../../common/redis_session_manager.h"
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
 #include "../../common/brpc_http_bridge.h"
@@ -95,7 +96,13 @@ int VideoServerBuilder::start() const {
         searchIndex = std::move(elasticsearch);
     }
 #endif
-    VideoDataFacade data(database, searchIndex.get());
+    std::unique_ptr<biteevent::MySqlOutboxRepository> outbox;
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    if (settings->rabbitmq.enabled) {
+        outbox = std::make_unique<biteevent::MySqlOutboxRepository>(database);
+    }
+#endif
+    VideoDataFacade data(database, searchIndex.get(), outbox.get());
     auto repository = data.createRepository();
     biterepo::MySqlAdminRepository adminRepository(database);
     VideoRpcService rpc(*repository, *repository, adminRepository,

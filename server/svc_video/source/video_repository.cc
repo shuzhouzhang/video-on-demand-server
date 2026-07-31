@@ -1,5 +1,8 @@
 #include "video_repository.h"
 
+#include "../../common/outbox.h"
+#include "message.pb.h"
+
 #include "../../common/elasticsearch.h"
 
 #include "../../common/util.h"
@@ -145,8 +148,9 @@ std::string makeVideoId(unsigned long long nextId) {
 
 MySqlVideoRepository::MySqlVideoRepository(
     bitedb::Database& database,
-    bitesearch::IVideoSearchIndex* searchIndex)
-    : database_(database), searchIndex_(searchIndex) {}
+    bitesearch::IVideoSearchIndex* searchIndex,
+    biteevent::MySqlOutboxRepository* outbox)
+    : database_(database), searchIndex_(searchIndex), outbox_(outbox) {}
 
 bool MySqlVideoRepository::list(std::vector<Video>& videos,
                                 std::string& error) {
@@ -252,7 +256,39 @@ bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
             "', '" + escapedVideoId + "', '" + escapedAccount + "', '" +
             escapedPlayUrl + "', '" + escapedOutput +
             "', 'PENDING', 0, 3, NOW())";
-        if (!database_.executeTransaction({sql, jobSql}, error)) return false;
+        std::vector<std::string> transaction{sql, jobSql};
+        if (outbox_) {
+            vod::api::HlsTranscodeMessage message;
+            message.set_video_id(videoId);
+            message.set_source_file(sourcePath);
+            message.set_output_bundle_id("bundle-" + videoId);
+            std::string payload;
+            if (!message.SerializeToString(&payload)) {
+                error = "failed to serialize transcode message";
+                return false;
+            }
+            biteevent::OutboxEvent event;
+            event.eventId = biteutil::Random::code(32);
+            event.exchange = "vod.transcode";
+            event.routingKey = "transcode.hls";
+            event.eventType = "HLS_TRANSCODE_REQUESTED";
+            event.aggregateType = "video";
+            event.aggregateId = videoId;
+            vod::api::EventEnvelope envelope;
+            envelope.set_event_id(event.eventId);
+            envelope.set_kind(vod::api::HLS_TRANSCODE_REQUESTED);
+            envelope.set_aggregate_type("video");
+            envelope.set_aggregate_id(videoId);
+            envelope.set_payload(payload);
+            if (!envelope.SerializeToString(&event.payload)) {
+                error = "failed to serialize transcode event";
+                return false;
+            }
+            std::string outboxSql;
+            if (!outbox_->buildInsertSql(event, outboxSql, error)) return false;
+            transaction.push_back(std::move(outboxSql));
+        }
+        if (!database_.executeTransaction(transaction, error)) return false;
     } else if (!database_.execute(sql, error)) {
         return false;
     }

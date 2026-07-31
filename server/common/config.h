@@ -36,6 +36,46 @@ struct AuthSettings {
     bool enforceGatewayIdentity = false;
 };
 
+struct RpcSettings {
+    bool enabled = false;
+    std::string bindHost = "127.0.0.1";
+    int timeoutMs = 2000;
+    int fileTimeoutMs = 120000;
+};
+
+struct RegistrySettings {
+    bool enabled = false;
+    std::string endpoint = "http://127.0.0.1:2379";
+    std::string prefix = "/vod/services";
+    int leaseTtlSeconds = 10;
+    int keepAliveSeconds = 3;
+    int refreshIntervalMs = 1000;
+};
+
+struct RabbitMqSettings {
+    bool enabled = false;
+    std::string host = "127.0.0.1";
+    std::uint16_t port = 5672;
+    std::string user = "video_app";
+    std::string password;
+    std::string passwordFile;
+    std::string virtualHost = "/vod";
+    int maxAttempts = 3;
+};
+
+struct ElasticsearchSettings {
+    bool enabled = false;
+    std::string endpoint = "http://127.0.0.1:9200";
+    std::string indexAlias = "vod_videos";
+    int timeoutMs = 2000;
+};
+
+struct FastDfsSettings {
+    bool enabled = false;
+    std::string clientConfig = "/home/dev/.local/opt/vod/fastdfs/conf/client.conf";
+    std::string publicPathPrefix = "/uploads";
+};
+
 struct TranscodeSettings {
     bool enabled = true;
     int workerThreads = 1;
@@ -54,6 +94,11 @@ struct AppSettings {
     DatabaseSettings database;
     RedisSettings redis;
     AuthSettings auth;
+    RpcSettings rpc;
+    RegistrySettings registry;
+    RabbitMqSettings rabbitmq;
+    ElasticsearchSettings elasticsearch;
+    FastDfsSettings fastdfs;
     TranscodeSettings transcode;
 };
 

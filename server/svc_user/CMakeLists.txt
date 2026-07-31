@@ -30,3 +30,8 @@ target_include_directories(user_service PRIVATE
 target_link_libraries(user_service PRIVATE
     jsoncpp fmt spdlog odb-mysql odb mysqlclient cpp-httplib hiredis OpenSSL::Crypto Threads::Threads
 )
+
+if(VOD_ENABLE_REFERENCE_RUNTIME)
+    target_sources(user_service PRIVATE ../common/etcd_registry.cc)
+    target_link_libraries(user_service PRIVATE vod_proto vod_reference_dependencies)
+endif()

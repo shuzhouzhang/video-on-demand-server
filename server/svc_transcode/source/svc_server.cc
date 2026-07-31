@@ -6,12 +6,18 @@
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
 #include "../../common/util.h"
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+#include "../../common/etcd_registry.h"
+#include "../../common/outbox.h"
+#include "../../common/rabbitmq_publisher.h"
+#endif
 #include "../../database/database.h"
 
 #include <httplib.h>
 #include <jsoncpp/json/json.h>
 
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -107,7 +113,10 @@ void registerRoutes(httplib::Server& server,
 
         svc_transcode::TranscodeJob job;
         std::string error;
-        if (!repository.enqueueForVideo(videoId, *account, job, error)) {
+        const std::string requestId = request.has_header("X-Request-Id")
+            ? request.get_header_value("X-Request-Id") : "";
+        if (!repository.enqueueForVideo(videoId, *account, requestId,
+                                        job, error)) {
             setError(response, error.find("not found") != std::string::npos
                                    ? 404
                                    : 500,
@@ -208,13 +217,50 @@ int TranscodeServerBuilder::start() const {
     }
     bitelog::bitelog_init(settings->log);
 
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<bitesvc::EtcdServiceProvider> serviceProvider;
+    if (settings->registry.enabled) {
+        bitesvc::ServiceEndpoint endpoint{
+            "transcode_service",
+            "http://127.0.0.1:" + std::to_string(settings->server.port),
+            "",
+            "http"};
+        serviceProvider = std::make_unique<bitesvc::EtcdServiceProvider>(
+            settings->registry, "transcode_service", std::move(endpoint));
+        if (!serviceProvider->start(error)) {
+            ERR("transcode_service etcd registration failed: {}", error);
+            return 1;
+        }
+    }
+#endif
+
     bitedb::Database database;
     if (!database.connect(settings->database, error)) {
         ERR("transcode_service database connection failed: {}", error);
         return 1;
     }
+    biteevent::MySqlOutboxRepository* outbox = nullptr;
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<biteevent::MySqlOutboxRepository> outboxRepository;
+    std::unique_ptr<biteevent::RabbitMqPublisher> eventPublisher;
+    std::unique_ptr<biteevent::OutboxDispatcher> outboxDispatcher;
+    std::unique_ptr<biteevent::OutboxWorker> outboxWorker;
+    if (settings->rabbitmq.enabled) {
+        outboxRepository =
+            std::make_unique<biteevent::MySqlOutboxRepository>(database);
+        outbox = outboxRepository.get();
+        eventPublisher =
+            std::make_unique<biteevent::RabbitMqPublisher>(settings->rabbitmq);
+        outboxDispatcher = std::make_unique<biteevent::OutboxDispatcher>(
+            *outboxRepository, *eventPublisher, 3, 5, 10);
+        outboxWorker =
+            std::make_unique<biteevent::OutboxWorker>(*outboxDispatcher, 500);
+        outboxWorker->start();
+    }
+#endif
     MySqlTranscodeRepository repository(
-        database, static_cast<unsigned int>(settings->transcode.maxAttempts));
+        database, static_cast<unsigned int>(settings->transcode.maxAttempts),
+        outbox);
     if (!repository.recoverExpired(error)) {
         ERR("transcode_service lease recovery failed: {}", error);
         return 1;

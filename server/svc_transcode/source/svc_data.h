@@ -5,6 +5,10 @@
 #include <optional>
 #include <string>
 
+namespace biteevent {
+class MySqlOutboxRepository;
+}
+
 namespace svc_transcode {
 
 struct TranscodeJob {
@@ -26,6 +30,7 @@ public:
 
     virtual bool enqueueForVideo(const std::string& videoId,
                                  const std::string& ownerAccount,
+                                 const std::string& requestId,
                                  TranscodeJob& job,
                                  std::string& error) = 0;
     virtual bool findByVideoId(const std::string& videoId,
@@ -61,10 +66,12 @@ public:
 class MySqlTranscodeRepository final : public ITranscodeRepository {
 public:
     MySqlTranscodeRepository(bitedb::Database& database,
-                             unsigned int defaultMaxAttempts);
+                             unsigned int defaultMaxAttempts,
+                             biteevent::MySqlOutboxRepository* outbox = nullptr);
 
     bool enqueueForVideo(const std::string& videoId,
                          const std::string& ownerAccount,
+                         const std::string& requestId,
                          TranscodeJob& job,
                          std::string& error) override;
     bool findByVideoId(const std::string& videoId,
@@ -103,6 +110,7 @@ private:
 
     bitedb::Database& database_;
     unsigned int defaultMaxAttempts_;
+    biteevent::MySqlOutboxRepository* outbox_;
 };
 
 }  // namespace svc_transcode

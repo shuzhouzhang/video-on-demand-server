@@ -4,20 +4,28 @@ package vod.api;
 
 import "base.proto";
 
+option cc_generic_services = true;
+
 message UploadFileRequest {
   string directory = 1;
   string original_name = 2;
   bytes content = 3;
+  RequestContext context = 4;
+  string mime_type = 5;
+  string bundle_id = 6;
+  string role = 7;
 }
 
 message UploadFileResponse {
   bool success = 1;
   string message = 2;
   FileInfo file = 3;
+  RpcStatus status = 4;
 }
 
 message DownloadFileRequest {
   string public_url = 1;
+  RequestContext context = 2;
 }
 
 message DownloadFileResponse {
@@ -25,6 +33,7 @@ message DownloadFileResponse {
   string message = 2;
   bytes content = 3;
   string content_type = 4;
+  RpcStatus status = 5;
 }
 
 service FileService {

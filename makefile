@@ -1,4 +1,4 @@
-.PHONY: server migrate microservices transcode_service test audit-routes smoke dev-start dev-stop dev-status dev-smoke dev-smoke-write dev-db-bootstrap dev-db-start dev-db-stop dev-db-status dev-db-migrate dev-redis-bootstrap dev-redis-start dev-redis-stop dev-redis-status dev-infra-bootstrap dev-infra-stop dev-start-ms dev-stop-ms dev-status-ms dev-smoke-ms dev-smoke-write-ms clean
+.PHONY: server migrate microservices transcode_service test audit-routes smoke cmake-configure cmake-build reference-infra-bootstrap reference-infra-start reference-infra-stop reference-infra-status dev-start dev-stop dev-status dev-smoke dev-smoke-write dev-db-bootstrap dev-db-start dev-db-stop dev-db-status dev-db-migrate dev-redis-bootstrap dev-redis-start dev-redis-stop dev-redis-status dev-infra-bootstrap dev-infra-stop dev-start-ms dev-stop-ms dev-status-ms dev-smoke-ms dev-smoke-write-ms clean
 
 DEV_CONFIG ?= conf/server.local.json
 DEV_LOG ?= /tmp/video_server_dev.log
@@ -16,6 +16,8 @@ FILE_SERVICE_LOG ?= /tmp/file_service_dev.log
 TRANSCODE_SERVICE_LOG ?= /tmp/transcode_service_dev.log
 MARIADB_TOOL ?= tools/dev_mariadb.sh
 REDIS_TOOL ?= tools/dev_redis.sh
+REFERENCE_INFRA_TOOL ?= tools/dev_reference_infra.sh
+CMAKE_BUILD_DIR ?= build/reference-runtime
 BASE_URL ?= http://127.0.0.1:10000
 CORE_SOURCES = server/common/auth.cc server/common/email_verification.cc \
 		server/common/config.cc \
@@ -55,7 +57,8 @@ video_service: server/svc_video/source/main.cc server/svc_video/source/svc_serve
 file_service: server/svc_file/source/main.cc server/svc_file/source/svc_server.cc \
 		server/svc_file/source/svc_data.cc server/svc_file/source/svc_rpc.cc \
 		server/svc_file/source/svc_sync.cc server/svc_file/source/svc_mq.cc \
-		server/common/config.cc server/common/util.cc server/common/bitelog.cc
+		server/common/config.cc server/common/object_storage.cc \
+		server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o file_service \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread
 
@@ -64,6 +67,7 @@ transcode_service: server/svc_transcode/source/main.cc \
 		server/svc_transcode/source/svc_data.cc server/svc_transcode/source/svc_rpc.cc \
 		server/svc_transcode/source/svc_worker.cc server/common/auth.cc \
 		server/common/config.cc server/common/util.cc server/common/bitelog.cc \
+		server/common/outbox.cc server/common/outbox_dispatcher.cc \
 		server/database/database.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o transcode_service \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -lodb-mysql \
@@ -85,6 +89,26 @@ api_gateway: server/svc_gateway/source/main.cc \
 
 microservices: api_gateway user_service video_service file_service transcode_service
 
+# CMake is authoritative for the reference-runtime branch. The direct g++
+# targets remain available while individual services migrate to brpc.
+cmake-configure:
+	cmake -S server -B $(CMAKE_BUILD_DIR) -DCMAKE_BUILD_TYPE=RelWithDebInfo -DVOD_ENABLE_REFERENCE_RUNTIME=ON
+
+cmake-build: cmake-configure
+	cmake --build $(CMAKE_BUILD_DIR) --parallel
+
+reference-infra-bootstrap:
+	@bash $(REFERENCE_INFRA_TOOL) bootstrap
+
+reference-infra-start:
+	@bash $(REFERENCE_INFRA_TOOL) start
+
+reference-infra-stop:
+	@bash $(REFERENCE_INFRA_TOOL) stop
+
+reference-infra-status:
+	@bash $(REFERENCE_INFRA_TOOL) status
+
 migrate: server/database/migrate_main.cc server/common/config.cc \
 		server/database/database.cc server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o database_migrate \
@@ -100,6 +124,8 @@ test:
 	$(MAKE) -C test/database test
 	$(MAKE) -C test/repository test
 	$(MAKE) -C test/transcode test
+	$(MAKE) -C test/outbox test
+	$(MAKE) -C test/object_storage test
 
 # Check whether the backend still covers the expected client route contract.
 audit-routes:
@@ -242,6 +268,8 @@ clean:
 	$(MAKE) -C test/database clean
 	$(MAKE) -C test/repository clean
 	$(MAKE) -C test/transcode clean
+	$(MAKE) -C test/outbox clean
+	$(MAKE) -C test/object_storage clean
 	$(MAKE) -C example/spdlog clean
 	rm -f video_server
 	rm -f api_gateway

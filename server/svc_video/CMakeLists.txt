@@ -29,3 +29,11 @@ target_include_directories(video_service PRIVATE
 target_link_libraries(video_service PRIVATE
     jsoncpp fmt spdlog odb-mysql odb mysqlclient cpp-httplib hiredis OpenSSL::Crypto Threads::Threads
 )
+
+if(VOD_ENABLE_REFERENCE_RUNTIME)
+    target_sources(video_service PRIVATE
+        ../common/etcd_registry.cc
+        ../common/elasticsearch.cc
+    )
+    target_link_libraries(video_service PRIVATE vod_proto vod_reference_dependencies)
+endif()

@@ -5,7 +5,11 @@
 
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
+#include "../../common/elasticsearch.h"
 #include "../../common/redis_session_manager.h"
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+#include "../../common/etcd_registry.h"
+#endif
 #include "../../database/database.h"
 #include "../../repository/admin_repository.h"
 
@@ -31,6 +35,23 @@ int VideoServerBuilder::start() const {
 
     bitelog::bitelog_init(settings->log);
 
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<bitesvc::EtcdServiceProvider> serviceProvider;
+    if (settings->registry.enabled) {
+        bitesvc::ServiceEndpoint endpoint{
+            "video_service",
+            "http://127.0.0.1:" + std::to_string(settings->server.port),
+            "",
+            "http"};
+        serviceProvider = std::make_unique<bitesvc::EtcdServiceProvider>(
+            settings->registry, "video_service", std::move(endpoint));
+        if (!serviceProvider->start(error)) {
+            ERR("video_service etcd registration failed: {}", error);
+            return 1;
+        }
+    }
+#endif
+
     bitedb::Database database;
     if (!database.connect(settings->database, error)) {
         ERR("{}", error);
@@ -49,7 +70,18 @@ int VideoServerBuilder::start() const {
     CacheToDB cacheToDb(cacheDelete);
     (void)cacheToDb;
 
-    VideoDataFacade data(database);
+    std::unique_ptr<bitesearch::IVideoSearchIndex> searchIndex;
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    if (settings->elasticsearch.enabled) {
+        auto elasticsearch = std::make_unique<bitesearch::ElasticsearchVideoIndex>(
+            settings->elasticsearch);
+        if (!elasticsearch->ensureIndex(error)) {
+            WRN("video_service Elasticsearch initialization deferred: {}", error);
+        }
+        searchIndex = std::move(elasticsearch);
+    }
+#endif
+    VideoDataFacade data(database, searchIndex.get());
     auto repository = data.createRepository();
     biterepo::MySqlAdminRepository adminRepository(database);
     VideoRpcService rpc(*repository, *repository, adminRepository,

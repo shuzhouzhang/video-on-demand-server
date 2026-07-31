@@ -13,6 +13,7 @@
     "port": 3306,
     "user": "video_app",
     "password": "",
+    "password_file": "/home/dev/.local/opt/vod/secrets/rabbitmq_password",
     "name": "video_on_demand"
   },
   "redis": {
@@ -20,5 +21,34 @@
   },
   "auth": {
     "enforce_gateway_identity": true
+  },
+  "rpc": {
+    "enabled": true,
+    "bind_host": "127.0.0.1",
+    "timeout_ms": 2000,
+    "file_timeout_ms": 120000
+  },
+  "registry": {
+    "enabled": true,
+    "endpoint": "http://127.0.0.1:2379",
+    "prefix": "/vod/services",
+    "lease_ttl_seconds": 10,
+    "keepalive_seconds": 3,
+    "refresh_interval_ms": 1000
+  },
+  "rabbitmq": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 5672,
+    "user": "video_app",
+    "password": "",
+    "virtual_host": "/vod",
+    "max_attempts": 3
+  },
+  "elasticsearch": {
+    "enabled": true,
+    "endpoint": "http://127.0.0.1:9200",
+    "index_alias": "vod_videos",
+    "timeout_ms": 2000
   }
 }

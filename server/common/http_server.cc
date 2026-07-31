@@ -1063,7 +1063,11 @@ void HttpServer::registerRoutes() {
             }
             body["success"] = false;
             body["message"] = "视频搜索暂时不可用";
-            setJsonResponse(response, 500, body);
+            setJsonResponse(response,
+                            error.rfind("elasticsearch unavailable:", 0) == 0
+                                ? 503
+                                : 500,
+                            body);
             return;
         }
 

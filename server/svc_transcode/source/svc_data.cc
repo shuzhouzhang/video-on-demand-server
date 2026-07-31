@@ -1,5 +1,12 @@
 #include "svc_data.h"
 
+#include "../../common/outbox.h"
+#include "../../common/util.h"
+
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+#include "message.pb.h"
+#endif
+
 #include <algorithm>
 #include <vector>
 
@@ -45,9 +52,11 @@ constexpr const char* JOB_SELECT =
 }  // namespace
 
 MySqlTranscodeRepository::MySqlTranscodeRepository(
-    bitedb::Database& database, unsigned int defaultMaxAttempts)
+    bitedb::Database& database, unsigned int defaultMaxAttempts,
+    biteevent::MySqlOutboxRepository* outbox)
     : database_(database),
-      defaultMaxAttempts_(std::max(1U, defaultMaxAttempts)) {}
+      defaultMaxAttempts_(std::max(1U, defaultMaxAttempts)),
+      outbox_(outbox) {}
 
 bool MySqlTranscodeRepository::readJob(
     const std::string& whereClause,
@@ -69,8 +78,12 @@ bool MySqlTranscodeRepository::readJob(
 bool MySqlTranscodeRepository::enqueueForVideo(
     const std::string& videoId,
     const std::string& ownerAccount,
+    const std::string& requestId,
     TranscodeJob& job,
     std::string& error) {
+#ifndef VOD_ENABLE_REFERENCE_RUNTIME
+    (void)requestId;
+#endif
     std::string video;
     std::string owner;
     if (!database_.escape(videoId, video, error) ||
@@ -120,13 +133,56 @@ bool MySqlTranscodeRepository::enqueueForVideo(
     std::string escapedJob;
     if (!database_.escape(jobId, escapedJob, error)) return false;
     const std::string sql =
-        "INSERT IGNORE INTO transcode_jobs (job_id, video_id, owner_account, "
+        "INSERT INTO transcode_jobs (job_id, video_id, owner_account, "
         "input_path, output_path, status, attempts, max_attempts, "
         "next_attempt_at) VALUES ('" + escapedJob + "', '" + video +
         "', '" + owner + "', '" + input + "', '" + output +
         "', 'PENDING', 0, " + std::to_string(defaultMaxAttempts_) +
         ", NOW())";
-    if (!database_.execute(sql, error)) return false;
+    if (outbox_) {
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+        vod::api::HlsTranscodeMessage message;
+        message.set_video_id(videoId);
+        message.set_source_file(inputPath);
+        message.set_output_bundle_id("bundle-" + videoId);
+        std::string messagePayload;
+        if (!message.SerializeToString(&messagePayload)) {
+            error = "failed to serialize transcode event payload";
+            return false;
+        }
+
+        biteevent::OutboxEvent event;
+        event.eventId = biteutil::Random::code(32);
+        event.exchange = "vod.transcode";
+        event.routingKey = "transcode.hls";
+        event.eventType = "HLS_TRANSCODE_REQUESTED";
+        event.aggregateType = "video";
+        event.aggregateId = videoId;
+        event.requestId = requestId;
+
+        vod::api::EventEnvelope envelope;
+        envelope.set_event_id(event.eventId);
+        envelope.set_kind(vod::api::HLS_TRANSCODE_REQUESTED);
+        envelope.set_aggregate_type(event.aggregateType);
+        envelope.set_aggregate_id(event.aggregateId);
+        envelope.set_request_id(requestId);
+        envelope.set_payload(messagePayload);
+        if (!envelope.SerializeToString(&event.payload)) {
+            error = "failed to serialize transcode event envelope";
+            return false;
+        }
+        std::string outboxSql;
+        if (!outbox_->buildInsertSql(event, outboxSql, error) ||
+            !database_.executeTransaction({sql, outboxSql}, error)) {
+            return false;
+        }
+#else
+        error = "outbox requires VOD_ENABLE_REFERENCE_RUNTIME";
+        return false;
+#endif
+    } else if (!database_.execute(sql, error)) {
+        return false;
+    }
     std::optional<TranscodeJob> found;
     if (!readJob("video_id = '" + video + "'", found, error) || !found) {
         if (error.empty()) error = "transcode job was not created";

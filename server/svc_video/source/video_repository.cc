@@ -1,5 +1,7 @@
 #include "video_repository.h"
 
+#include "../../common/elasticsearch.h"
+
 #include "../../common/util.h"
 
 #include <filesystem>
@@ -141,8 +143,10 @@ std::string makeVideoId(unsigned long long nextId) {
 
 }  // namespace
 
-MySqlVideoRepository::MySqlVideoRepository(bitedb::Database& database)
-    : database_(database) {}
+MySqlVideoRepository::MySqlVideoRepository(
+    bitedb::Database& database,
+    bitesearch::IVideoSearchIndex* searchIndex)
+    : database_(database), searchIndex_(searchIndex) {}
 
 bool MySqlVideoRepository::list(std::vector<Video>& videos,
                                 std::string& error) {
@@ -313,6 +317,19 @@ bool MySqlVideoRepository::search(const std::string& keyword,
                                   std::vector<Video>& videos,
                                   std::string& error) {
     videos.clear();
+    if (searchIndex_) {
+        std::vector<std::string> ids;
+        if (!searchIndex_->searchIds(keyword, ids, error)) {
+            error = "elasticsearch unavailable: " + error;
+            return false;
+        }
+        for (const auto& id : ids) {
+            std::optional<Video> video;
+            if (!findById(id, video, error)) return false;
+            if (video) videos.push_back(std::move(*video));
+        }
+        return true;
+    }
     std::string escapedKeyword;
     if (!database_.escape(keyword, escapedKeyword, error)) {
         return false;

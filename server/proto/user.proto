@@ -4,9 +4,12 @@ package vod.api;
 
 import "base.proto";
 
+option cc_generic_services = true;
+
 message LoginRequest {
   string account = 1;
   string password = 2;
+  RequestContext context = 3;
 }
 
 message LoginResponse {
@@ -14,16 +17,19 @@ message LoginResponse {
   string message = 2;
   string token = 3;
   UserInfo user = 4;
+  RpcStatus status = 5;
 }
 
 message GetProfileRequest {
   string account = 1;
+  RequestContext context = 2;
 }
 
 message GetProfileResponse {
   bool success = 1;
   string message = 2;
   UserInfo user = 3;
+  RpcStatus status = 4;
 }
 
 service UserService {

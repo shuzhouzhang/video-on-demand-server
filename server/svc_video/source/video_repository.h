@@ -6,12 +6,18 @@
 #include "../../database/database.h"
 #include "../../repository/repository.h"
 
+namespace bitesearch {
+class IVideoSearchIndex;
+}
+
 namespace bitevideo {
 
 class MySqlVideoRepository final : public biterepo::IVideoRepository,
                                    public biterepo::IInteractionRepository {
 public:
-    explicit MySqlVideoRepository(bitedb::Database& database);
+    explicit MySqlVideoRepository(
+        bitedb::Database& database,
+        bitesearch::IVideoSearchIndex* searchIndex = nullptr);
 
     bool list(std::vector<Video>& videos, std::string& error) override;
     bool createVideo(const VideoDraft& draft,
@@ -87,6 +93,7 @@ public:
 
 private:
     bitedb::Database& database_;
+    bitesearch::IVideoSearchIndex* searchIndex_;
 };
 
 }  // namespace bitevideo

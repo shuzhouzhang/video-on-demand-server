@@ -6,6 +6,8 @@ add_executable(transcode_service
     source/svc_worker.cc
     ../common/auth.cc
     ../common/config.cc
+    ../common/outbox.cc
+    ../common/outbox_dispatcher.cc
     ../common/util.cc
     ../common/bitelog.cc
     ../database/database.cc
@@ -21,3 +23,11 @@ target_link_libraries(transcode_service PRIVATE
     jsoncpp fmt spdlog cpp-httplib Threads::Threads
     odb-mysql odb mysqlclient
 )
+
+if(VOD_ENABLE_REFERENCE_RUNTIME)
+    target_sources(transcode_service PRIVATE
+        ../common/etcd_registry.cc
+        ../common/rabbitmq_publisher.cc
+    )
+    target_link_libraries(transcode_service PRIVATE vod_proto vod_reference_dependencies)
+endif()

@@ -4,13 +4,18 @@
 
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
+#include "../../common/object_storage.h"
 #include "../../common/util.h"
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+#include "../../common/etcd_registry.h"
+#endif
 
 #include <httplib.h>
 #include <jsoncpp/json/json.h>
 
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -26,10 +31,14 @@ void setJsonResponse(httplib::Response& response,
         "application/json; charset=utf-8");
 }
 
-void registerRoutes(httplib::Server& server, const svc_file::FileDataFacade& data) {
-    std::error_code ignored;
-    std::filesystem::create_directories("uploads", ignored);
-    server.set_mount_point("/uploads", "uploads");
+void registerRoutes(httplib::Server& server,
+                    const svc_file::FileDataFacade& data,
+                    bool mountLocalUploads) {
+    if (mountLocalUploads) {
+        std::error_code ignored;
+        std::filesystem::create_directories("uploads", ignored);
+        server.set_mount_point("/uploads", "uploads");
+    }
 
     server.Get("/health", [](const httplib::Request&,
                              httplib::Response& response) {
@@ -79,7 +88,30 @@ void registerRoutes(httplib::Server& server, const svc_file::FileDataFacade& dat
         body["storedPath"] = stored.storedPath;
         body["publicUrl"] = stored.publicUrl;
         body["originalName"] = stored.originalName;
+        body["storageGroup"] = stored.storageGroup;
+        body["remoteName"] = stored.remoteName;
+        body["sizeBytes"] = Json::UInt64(stored.sizeBytes);
         setJsonResponse(response, 200, body);
+    });
+
+    server.Get(R"(/uploads/(.+))", [&data](const httplib::Request& request,
+                                             httplib::Response& response) {
+        if (request.matches.size() < 2) {
+            response.status = 404;
+            return;
+        }
+        std::string content;
+        std::string error;
+        if (!data.downloadStoredFile(request.matches[1].str(), content, error)) {
+            Json::Value body;
+            body["success"] = false;
+            body["message"] = error.empty() ? "文件不存在" : error;
+            setJsonResponse(response, error == "local object not found" ? 404 : 503,
+                            body);
+            return;
+        }
+        response.status = 200;
+        response.set_content(std::move(content), "application/octet-stream");
     });
 }
 
@@ -102,12 +134,38 @@ int FileServerBuilder::start() const {
 
     bitelog::bitelog_init(settings->log);
 
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<bitesvc::EtcdServiceProvider> serviceProvider;
+    if (settings->registry.enabled) {
+        bitesvc::ServiceEndpoint endpoint{
+            "file_service",
+            "http://127.0.0.1:" + std::to_string(settings->server.port),
+            "",
+            "http"};
+        serviceProvider = std::make_unique<bitesvc::EtcdServiceProvider>(
+            settings->registry, "file_service", std::move(endpoint));
+        if (!serviceProvider->start(error)) {
+            ERR("file_service etcd registration failed: {}", error);
+            return 1;
+        }
+    }
+#endif
+
     httplib::Server server;
     CacheDelete cacheDelete;
     (void)cacheDelete;
 
-    FileDataFacade data;
-    registerRoutes(server, data);
+    std::unique_ptr<bitestorage::IObjectStorage> storage;
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    if (settings->fastdfs.enabled) {
+        storage = bitestorage::makeFastDfsObjectStorage(settings->fastdfs);
+    }
+#endif
+    if (!storage) storage = bitestorage::makeLocalObjectStorage("uploads");
+    const std::string publicPrefix = settings->fastdfs.publicPathPrefix.empty()
+        ? "/uploads" : settings->fastdfs.publicPathPrefix;
+    FileDataFacade data(*storage, publicPrefix);
+    registerRoutes(server, data, !settings->fastdfs.enabled);
 
     INF("file_service listening on 0.0.0.0:{}", settings->server.port);
     if (!server.listen("0.0.0.0", settings->server.port)) {

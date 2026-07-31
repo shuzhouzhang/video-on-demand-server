@@ -7,6 +7,10 @@
 #include "../../common/service_registry.h"
 #include "../../common/util.h"
 
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+#include "../../common/etcd_registry.h"
+#endif
+
 #include <httplib.h>
 #include <jsoncpp/json/json.h>
 
@@ -14,6 +18,7 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -261,6 +266,18 @@ int GatewayServerBuilder::start() const {
         return 1;
     }
 
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<bitesvc::EtcdServiceWatcher> serviceWatcher;
+    if (settings.discovery.registrySettings.enabled) {
+        serviceWatcher = std::make_unique<bitesvc::EtcdServiceWatcher>(
+            settings.discovery.registrySettings, settings.discovery.registry);
+        if (!serviceWatcher->start(error)) {
+            std::cerr << "api_gateway etcd 连接失败: " << error << '\n';
+            return 1;
+        }
+    }
+#endif
+
     httplib::Server server;
     server.Get("/health", [](const httplib::Request&, httplib::Response& response) {
         Json::Value body;
@@ -292,12 +309,12 @@ int GatewayServerBuilder::start() const {
             setJsonResponse(response, 404, body);
             return;
         }
-        const auto* downstream = settings.discovery.registry.find(downstreamName);
+        const auto downstream = settings.discovery.registry.resolve(downstreamName);
         if (!downstream) {
             Json::Value body;
             body["success"] = false;
             body["message"] = "downstream service not registered";
-            setJsonResponse(response, 502, body);
+            setJsonResponse(response, 503, body);
             return;
         }
         forwardToDownstream(settings, *downstream, request, response,

@@ -7,6 +7,9 @@
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
 #include "../../common/redis_session_manager.h"
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+#include "../../common/etcd_registry.h"
+#endif
 #include "../../database/database.h"
 #include "../../repository/admin_repository.h"
 
@@ -31,6 +34,23 @@ int UserServerBuilder::start() const {
     }
 
     bitelog::bitelog_init(settings->log);
+
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<bitesvc::EtcdServiceProvider> serviceProvider;
+    if (settings->registry.enabled) {
+        bitesvc::ServiceEndpoint endpoint{
+            "user_service",
+            "http://127.0.0.1:" + std::to_string(settings->server.port),
+            "",
+            "http"};
+        serviceProvider = std::make_unique<bitesvc::EtcdServiceProvider>(
+            settings->registry, "user_service", std::move(endpoint));
+        if (!serviceProvider->start(error)) {
+            ERR("user_service etcd registration failed: {}", error);
+            return 1;
+        }
+    }
+#endif
 
     bitedb::Database database;
     if (!database.connect(settings->database, error)) {

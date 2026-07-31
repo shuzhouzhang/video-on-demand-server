@@ -4,6 +4,17 @@
   "timeout_ms": 3000,
   "file_service": "http://127.0.0.1:10001",
   "transcode_service": "http://127.0.0.1:10004",
+  "rpc": {
+    "enabled": true,
+    "timeout_ms": 2000,
+    "file_timeout_ms": 120000
+  },
+  "registry": {
+    "enabled": true,
+    "endpoint": "http://127.0.0.1:2379",
+    "prefix": "/vod/services",
+    "refresh_interval_ms": 1000
+  },
   "redis": {
     "enabled": true,
     "host": "127.0.0.1",

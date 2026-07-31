@@ -22,6 +22,7 @@ public:
     bool retrying = false;
 
     bool enqueueForVideo(const std::string&, const std::string&,
+                         const std::string&,
                          svc_transcode::TranscodeJob&, std::string&) override {
         return false;
     }

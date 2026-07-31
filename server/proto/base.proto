@@ -2,6 +2,19 @@ syntax = "proto3";
 
 package vod.api;
 
+option cc_generic_services = true;
+
+message RequestContext {
+  string request_id = 1;
+  string authenticated_account = 2;
+}
+
+message RpcStatus {
+  int32 code = 1;
+  string message = 2;
+  string request_id = 3;
+}
+
 message UserInfo {
   string account = 1;
   string user_name = 2;
@@ -16,6 +29,11 @@ message FileInfo {
   string stored_path = 3;
   string public_url = 4;
   int64 size = 5;
+  string storage_group = 6;
+  string remote_name = 7;
+  string mime_type = 8;
+  string checksum_sha256 = 9;
+  string bundle_id = 10;
 }
 
 message VideoInfo {

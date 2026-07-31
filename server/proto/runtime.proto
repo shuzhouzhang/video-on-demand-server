@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package vod.runtime;
+
+option cc_generic_services = true;
+
+message ServiceInstance {
+  string service_name = 1;
+  string instance_id = 2;
+  string host = 3;
+  uint32 port = 4;
+  string protocol = 5;
+  string version = 6;
+  int64 started_at_unix_ms = 7;
+}
+
+message InternalHttpRequest {
+  string request_id = 1;
+  string authenticated_account = 2;
+  string method = 3;
+  string target = 4;
+  map<string, string> headers = 5;
+  bytes body = 6;
+}
+
+message InternalHttpResponse {
+  int32 status = 1;
+  map<string, string> headers = 2;
+  bytes body = 3;
+  string content_type = 4;
+  string request_id = 5;
+  int32 error_code = 6;
+  string error_message = 7;
+}
+
+// 迁移期的统一内部传输服务。业务服务逐项切换到 user/video/file.proto
+// 的强类型方法；未切换的旧路由暂时通过该服务保持 Qt HTTP 契约。
+service InternalHttpService {
+  rpc Forward(InternalHttpRequest) returns (InternalHttpResponse);
+}

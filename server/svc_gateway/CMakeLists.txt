@@ -20,3 +20,8 @@ target_include_directories(api_gateway PRIVATE
 target_link_libraries(api_gateway PRIVATE
     jsoncpp fmt spdlog cpp-httplib hiredis Threads::Threads
 )
+
+if(VOD_ENABLE_REFERENCE_RUNTIME)
+    target_sources(api_gateway PRIVATE ../common/etcd_registry.cc)
+    target_link_libraries(api_gateway PRIVATE vod_proto vod_reference_dependencies)
+endif()

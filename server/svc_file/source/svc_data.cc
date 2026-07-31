@@ -1,10 +1,6 @@
 #include "svc_data.h"
 
-#include <algorithm>
-#include <cctype>
-#include <ctime>
 #include <filesystem>
-#include <fstream>
 
 namespace {
 
@@ -12,42 +8,17 @@ std::string pathFileName(const std::string& filename) {
     return std::filesystem::path(filename).filename().string();
 }
 
-std::string safeSegment(std::string value) {
-    for (char& ch : value) {
-        const bool safe = std::isalnum(static_cast<unsigned char>(ch)) ||
-            ch == '-' || ch == '_';
-        if (!safe) {
-            ch = '_';
-        }
-    }
-    return value.empty() ? "misc" : value;
-}
-
-bool writeBinaryFile(const std::filesystem::path& path,
-                     const std::string& content,
-                     std::string& error) {
-    std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
-    if (ec) {
-        error = "创建目录失败: " + ec.message();
-        return false;
-    }
-    std::ofstream out(path, std::ios::binary);
-    if (!out) {
-        error = "打开文件失败: " + path.string();
-        return false;
-    }
-    out.write(content.data(), static_cast<std::streamsize>(content.size()));
-    if (!out) {
-        error = "写入文件失败: " + path.string();
-        return false;
-    }
-    return true;
-}
-
 }  // namespace
 
 namespace svc_file {
+
+FileDataFacade::FileDataFacade(bitestorage::IObjectStorage& storage,
+                               std::string publicPathPrefix)
+    : storage_(storage), publicPathPrefix_(std::move(publicPathPrefix)) {
+    while (publicPathPrefix_.size() > 1 && publicPathPrefix_.back() == '/') {
+        publicPathPrefix_.pop_back();
+    }
+}
 
 bool FileDataFacade::storeUploadedFile(const std::string& directory,
                                        const std::string& filename,
@@ -61,20 +32,29 @@ bool FileDataFacade::storeUploadedFile(const std::string& directory,
         return false;
     }
 
-    const std::string safeDirectory = safeSegment(directory);
-    const std::string prefix =
-        std::to_string(std::time(nullptr)) + "-" + safeSegment(originalName);
-    const std::filesystem::path storedPath =
-        std::filesystem::path("uploads") / safeDirectory / prefix;
-
-    if (!writeBinaryFile(storedPath, content, error)) {
+    bitestorage::StoredObject object;
+    if (!storage_.put(directory, originalName, content, object, error)) {
         return false;
     }
 
     stored.originalName = originalName;
-    stored.storedPath = storedPath.generic_string();
-    stored.publicUrl = "/" + stored.storedPath;
+    stored.storedPath = object.locator;
+    stored.publicUrl = publicPathPrefix_ + "/" + object.locator;
+    stored.storageGroup = object.storageGroup;
+    stored.remoteName = object.remoteName;
+    stored.sizeBytes = object.sizeBytes;
     return true;
+}
+
+bool FileDataFacade::downloadStoredFile(const std::string& locator,
+                                        std::string& content,
+                                        std::string& error) const {
+    if (locator.empty() || locator.find("..") != std::string::npos ||
+        locator.front() == '/') {
+        error = "invalid object locator";
+        return false;
+    }
+    return storage_.get(locator, content, error);
 }
 
 }  // namespace svc_file

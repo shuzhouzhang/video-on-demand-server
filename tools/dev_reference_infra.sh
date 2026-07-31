@@ -110,6 +110,16 @@ bootstrap_fastdfs() {
     [[ -r /etc/fdfs/storage.conf ]] || { echo "/etc/fdfs/storage.conf is missing" >&2; return 1; }
     [[ -r /etc/fdfs/client.conf ]] || { echo "/etc/fdfs/client.conf is missing" >&2; return 1; }
 
+    local tracker_host="${VOD_FASTDFS_HOST:-}"
+    if [[ -z "${tracker_host}" ]]; then
+        tracker_host="$(hostname -I | tr ' ' '\n' | \
+            grep -Ev '^(127\.|$)' | head -1 || true)"
+    fi
+    [[ -n "${tracker_host}" ]] || {
+        echo "cannot determine a non-loopback FastDFS host; set VOD_FASTDFS_HOST" >&2
+        return 1
+    }
+
     mkdir -p "${FASTDFS_HOME}/conf" "${DATA_DIR}/fastdfs/client" \
         "${DATA_DIR}/fastdfs/tracker" "${DATA_DIR}/fastdfs/storage" \
         "${DATA_DIR}/fastdfs/files"
@@ -124,10 +134,19 @@ bootstrap_fastdfs() {
         "${FASTDFS_HOME}/conf/storage.conf"
     sed -E -i "s#^[[:space:]]*base_path[[:space:]]*=.*#base_path = ${DATA_DIR}/fastdfs/client#" \
         "${FASTDFS_HOME}/conf/client.conf"
+    sed -E -i "s#^[[:space:]]*bind_addr[[:space:]]*=.*#bind_addr = ${tracker_host}#" \
+        "${FASTDFS_HOME}/conf/tracker.conf" \
+        "${FASTDFS_HOME}/conf/storage.conf"
     for config in "${FASTDFS_HOME}/conf/storage.conf" \
                   "${FASTDFS_HOME}/conf/client.conf"; do
         sed -E -i '/^[[:space:]]*tracker_server[[:space:]]*=/d' "${config}"
-        printf '\ntracker_server = 127.0.0.1:22122\n' >>"${config}"
+        printf '\ntracker_server = %s:22122\n' "${tracker_host}" >>"${config}"
+    done
+    for config in "${FASTDFS_HOME}/conf/tracker.conf" \
+                  "${FASTDFS_HOME}/conf/storage.conf"; do
+        sed -E -i '/^[[:space:]]*allow_hosts[[:space:]]*=/d' "${config}"
+        printf '\nallow_hosts = 127.0.0.1\nallow_hosts = %s\n' \
+            "${tracker_host}" >>"${config}"
     done
 }
 

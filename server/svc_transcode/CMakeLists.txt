@@ -30,6 +30,7 @@ if(VOD_ENABLE_REFERENCE_RUNTIME)
         ../common/service_registry.cc
         ../common/brpc_http_bridge.cc
         ../common/rabbitmq_publisher.cc
+        ../common/rabbitmq_consumer.cc
     )
     target_link_libraries(transcode_service PRIVATE vod_proto vod_reference_dependencies)
 endif()

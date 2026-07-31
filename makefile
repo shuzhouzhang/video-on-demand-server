@@ -234,14 +234,14 @@ dev-start-ms: microservices
 		"http://127.0.0.1:10004/healthz"; do \
 		ready=0; \
 		for attempt in $$(seq 1 20); do \
-			if curl --max-time 1 -fsS "$$url" >/dev/null; then ready=1; break; fi; \
+			if curl --max-time 1 -fsS "$$url" >/dev/null 2>&1; then ready=1; break; fi; \
 			sleep 0.5; \
 		done; \
 		if [ "$$ready" -ne 1 ]; then echo "service did not become healthy: $$url"; exit 1; fi; \
 	done
 	@setsid -f "$(API_GATEWAY_BIN)" "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" > "$(GATEWAY_LOG)" 2>&1 < /dev/null
 	@ready=0; for attempt in $$(seq 1 20); do \
-		if curl --max-time 1 -fsS "http://127.0.0.1:10000/healthz" >/dev/null; then ready=1; break; fi; \
+		if curl --max-time 1 -fsS "http://127.0.0.1:10000/healthz" >/dev/null 2>&1; then ready=1; break; fi; \
 		sleep 0.5; \
 	done; \
 	if [ "$$ready" -ne 1 ]; then echo "api_gateway did not become healthy"; exit 1; fi

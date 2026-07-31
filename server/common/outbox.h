@@ -117,6 +117,10 @@ private:
 class ConsumedEventStore {
 public:
     explicit ConsumedEventStore(bitedb::Database& database);
+    bool wasProcessed(const std::string& consumerName,
+                      const std::string& eventId,
+                      bool& processed,
+                      std::string& error);
     bool markIfFirst(const std::string& consumerName,
                      const std::string& eventId,
                      bool& first,

@@ -197,6 +197,28 @@ bool MySqlOutboxRepository::markFailed(const OutboxEvent& event,
 ConsumedEventStore::ConsumedEventStore(bitedb::Database& database)
     : database_(database) {}
 
+bool ConsumedEventStore::wasProcessed(const std::string& consumerName,
+                                      const std::string& eventId,
+                                      bool& processed,
+                                      std::string& error) {
+    processed = false;
+    std::string consumer;
+    std::string event;
+    if (!database_.escape(consumerName, consumer, error) ||
+        !database_.escape(eventId, event, error)) {
+        return false;
+    }
+    std::vector<bitedb::Database::QueryRow> rows;
+    if (!database_.query(
+            "SELECT event_id FROM consumed_events WHERE consumer_name = '" +
+                consumer + "' AND event_id = '" + event + "' LIMIT 1",
+            rows, error)) {
+        return false;
+    }
+    processed = !rows.empty();
+    return true;
+}
+
 bool ConsumedEventStore::markIfFirst(const std::string& consumerName,
                                      const std::string& eventId,
                                      bool& first,

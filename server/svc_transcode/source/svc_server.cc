@@ -10,7 +10,9 @@
 #include "../../common/brpc_http_bridge.h"
 #include "../../common/etcd_registry.h"
 #include "../../common/outbox.h"
+#include "../../common/rabbitmq_consumer.h"
 #include "../../common/rabbitmq_publisher.h"
+#include "message.pb.h"
 #endif
 #include "../../database/database.h"
 
@@ -281,7 +283,56 @@ int TranscodeServerBuilder::start() const {
     }
     FfmpegRunner runner(settings->transcode);
     SvcWorker worker(repository, runner, settings->transcode);
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<biteevent::ConsumedEventStore> consumedEvents;
+    std::unique_ptr<biteevent::RabbitMqConsumer> transcodeConsumer;
+    if (settings->transcode.enabled && settings->rabbitmq.enabled) {
+        consumedEvents =
+            std::make_unique<biteevent::ConsumedEventStore>(database);
+        transcodeConsumer = std::make_unique<biteevent::RabbitMqConsumer>(
+            settings->rabbitmq, "vod.transcode", "transcode.hls",
+            "vod.transcode.hls",
+            [&worker, store = consumedEvents.get()](
+                const biteevent::ConsumedMessage& message,
+                std::string& handlerError) {
+                vod::api::EventEnvelope envelope;
+                if (!envelope.ParseFromString(message.body) ||
+                    envelope.kind() != vod::api::HLS_TRANSCODE_REQUESTED ||
+                    envelope.event_id().empty()) {
+                    handlerError = "invalid HLS transcode event envelope";
+                    return false;
+                }
+                if (!message.eventId.empty() &&
+                    message.eventId != envelope.event_id()) {
+                    handlerError = "RabbitMQ message id does not match event envelope";
+                    return false;
+                }
+                bool alreadyProcessed = false;
+                if (!store->wasProcessed("transcode_service",
+                                         envelope.event_id(),
+                                         alreadyProcessed, handlerError)) {
+                    return false;
+                }
+                if (alreadyProcessed) return true;
+
+                bool processed = false;
+                if (!worker.processOne(processed, handlerError)) return false;
+
+                bool first = false;
+                if (!store->markIfFirst("transcode_service",
+                                        envelope.event_id(), first,
+                                        handlerError)) {
+                    return false;
+                }
+                return true;
+            });
+        transcodeConsumer->start();
+    } else if (settings->transcode.enabled) {
+        worker.start();
+    }
+#else
     if (settings->transcode.enabled) worker.start();
+#endif
 
     httplib::Server server;
     registerRoutes(server, repository,

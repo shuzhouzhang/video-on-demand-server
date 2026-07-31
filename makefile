@@ -18,6 +18,11 @@ MARIADB_TOOL ?= tools/dev_mariadb.sh
 REDIS_TOOL ?= tools/dev_redis.sh
 REFERENCE_INFRA_TOOL ?= tools/dev_reference_infra.sh
 CMAKE_BUILD_DIR ?= build/reference-runtime
+API_GATEWAY_BIN ?= $(CMAKE_BUILD_DIR)/svc_gateway/api_gateway
+USER_SERVICE_BIN ?= $(CMAKE_BUILD_DIR)/svc_user/user_service
+VIDEO_SERVICE_BIN ?= $(CMAKE_BUILD_DIR)/svc_video/video_service
+FILE_SERVICE_BIN ?= $(CMAKE_BUILD_DIR)/svc_file/file_service
+TRANSCODE_SERVICE_BIN ?= $(CMAKE_BUILD_DIR)/svc_transcode/transcode_service
 BASE_URL ?= http://127.0.0.1:10000
 CORE_SOURCES = server/common/auth.cc server/common/email_verification.cc \
 		server/common/config.cc \
@@ -87,7 +92,7 @@ api_gateway: server/svc_gateway/source/main.cc \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib \
 		-lhiredis -pthread
 
-microservices: api_gateway user_service video_service file_service transcode_service
+microservices: cmake-build
 
 # CMake is authoritative for the reference-runtime branch. The direct g++
 # targets remain available while individual services migrate to brpc.
@@ -217,12 +222,12 @@ dev-start-ms: microservices
 	@bash $(MARIADB_TOOL) start
 	@bash $(REDIS_TOOL) start
 	@$(MAKE) dev-stop-ms >/dev/null || true
-	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./user_service "$(USER_SERVICE_CONFIG)" > "$(USER_SERVICE_LOG)" 2>&1 < /dev/null
-	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./video_service "$(VIDEO_SERVICE_CONFIG)" > "$(VIDEO_SERVICE_LOG)" 2>&1 < /dev/null
-	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./file_service "$(FILE_SERVICE_CONFIG)" > "$(FILE_SERVICE_LOG)" 2>&1 < /dev/null
-	@setsid -f ./transcode_service "$(TRANSCODE_SERVICE_CONFIG)" > "$(TRANSCODE_SERVICE_LOG)" 2>&1 < /dev/null
+	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f "$(USER_SERVICE_BIN)" "$(USER_SERVICE_CONFIG)" > "$(USER_SERVICE_LOG)" 2>&1 < /dev/null
+	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f "$(VIDEO_SERVICE_BIN)" "$(VIDEO_SERVICE_CONFIG)" > "$(VIDEO_SERVICE_LOG)" 2>&1 < /dev/null
+	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f "$(FILE_SERVICE_BIN)" "$(FILE_SERVICE_CONFIG)" > "$(FILE_SERVICE_LOG)" 2>&1 < /dev/null
+	@setsid -f "$(TRANSCODE_SERVICE_BIN)" "$(TRANSCODE_SERVICE_CONFIG)" > "$(TRANSCODE_SERVICE_LOG)" 2>&1 < /dev/null
 	@sleep 1
-	@setsid -f ./api_gateway "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" > "$(GATEWAY_LOG)" 2>&1 < /dev/null
+	@setsid -f "$(API_GATEWAY_BIN)" "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" > "$(GATEWAY_LOG)" 2>&1 < /dev/null
 	@sleep 1
 	@$(MAKE) dev-status-ms
 
@@ -232,7 +237,7 @@ dev-stop-ms:
 	@pkill -x user_service 2>/dev/null || true
 	@pkill -x video_service 2>/dev/null || true
 	@pkill -x file_service 2>/dev/null || true
-	@pkill -f '^\./transcode_service ' 2>/dev/null || true
+	@pkill -f '/svc_transcode/transcode_service ' 2>/dev/null || true
 	@pkill -f '^\./interaction_service ' 2>/dev/null || true
 	@echo "microservices stopped"
 
@@ -244,7 +249,7 @@ dev-status-ms:
 	@pgrep -a user_service || { echo "user_service is not running"; exit 1; }
 	@pgrep -a video_service || { echo "video_service is not running"; exit 1; }
 	@pgrep -a file_service || { echo "file_service is not running"; exit 1; }
-	@pgrep -af '^\./transcode_service( |$$)' || { echo "transcode_service is not running"; exit 1; }
+	@pgrep -af '/svc_transcode/transcode_service( |$$)' || { echo "transcode_service is not running"; exit 1; }
 	@curl -fsS "http://127.0.0.1:10000/healthz" >/dev/null && echo "api_gateway healthz ok"
 	@curl -fsS "http://127.0.0.1:10002/healthz" >/dev/null && echo "user_service healthz ok"
 	@curl -fsS "http://127.0.0.1:10003/healthz" >/dev/null && echo "video_service healthz ok"

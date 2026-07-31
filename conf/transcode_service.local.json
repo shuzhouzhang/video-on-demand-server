@@ -59,7 +59,7 @@
     "lease_seconds": 300,
     "max_attempts": 3,
     "retry_delay_seconds": 30,
-    "ffmpeg_path": "/home/dev/.local/bin/ffmpeg",
+    "ffmpeg_path": "/home/dev/.local/opt/vod/ffmpeg-release/ffmpeg",
     "upload_root": "uploads",
     "output_root": "uploads/transcoded"
   }

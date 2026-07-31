@@ -1,4 +1,4 @@
-.PHONY: server migrate microservices transcode_service test audit-routes smoke cmake-configure cmake-build reference-infra-bootstrap reference-infra-start reference-infra-stop reference-infra-status dev-start dev-stop dev-status dev-smoke dev-smoke-write dev-db-bootstrap dev-db-start dev-db-stop dev-db-status dev-db-migrate dev-redis-bootstrap dev-redis-start dev-redis-stop dev-redis-status dev-infra-bootstrap dev-infra-stop dev-start-ms dev-stop-ms dev-status-ms dev-smoke-ms dev-smoke-write-ms clean
+.PHONY: server migrate microservices transcode_service test audit-routes smoke cmake-configure cmake-build reference-infra-bootstrap reference-infra-start reference-infra-stop reference-infra-status dev-start dev-stop dev-status dev-smoke dev-smoke-write dev-db-bootstrap dev-db-start dev-db-stop dev-db-status dev-db-migrate dev-redis-bootstrap dev-redis-start dev-redis-stop dev-redis-status dev-ffmpeg-bootstrap dev-ffmpeg-status dev-infra-bootstrap dev-infra-stop dev-start-ms dev-stop-ms dev-status-ms dev-smoke-ms dev-smoke-write-ms clean
 
 DEV_CONFIG ?= conf/server.local.json
 DEV_LOG ?= /tmp/video_server_dev.log
@@ -16,6 +16,7 @@ FILE_SERVICE_LOG ?= /tmp/file_service_dev.log
 TRANSCODE_SERVICE_LOG ?= /tmp/transcode_service_dev.log
 MARIADB_TOOL ?= tools/dev_mariadb.sh
 REDIS_TOOL ?= tools/dev_redis.sh
+FFMPEG_TOOL ?= tools/dev_ffmpeg.sh
 REFERENCE_INFRA_TOOL ?= tools/dev_reference_infra.sh
 CMAKE_BUILD_DIR ?= build/reference-runtime
 CMAKE_BUILD_JOBS ?= 2
@@ -205,9 +206,16 @@ dev-redis-stop:
 dev-redis-status:
 	@bash $(REDIS_TOOL) status
 
+dev-ffmpeg-bootstrap:
+	@bash $(FFMPEG_TOOL) bootstrap
+
+dev-ffmpeg-status:
+	@bash $(FFMPEG_TOOL) status
+
 dev-infra-bootstrap:
 	@$(MAKE) dev-db-bootstrap
 	@$(MAKE) dev-redis-bootstrap
+	@$(MAKE) dev-ffmpeg-bootstrap
 	@$(MAKE) dev-db-migrate
 	@$(MAKE) dev-redis-start
 

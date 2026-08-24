@@ -1,6 +1,7 @@
 #include "../../server/common/auth.h"
 #include "../../server/common/email_verification.h"
 #include "../../server/common/password_hash.h"
+#include "../../server/common/session_token.h"
 
 #include <cctype>
 #include <cstdlib>
@@ -23,6 +24,33 @@ int main() {
     ok &= expect(!biteauth::parseBearerToken("Bearer "), "empty token rejected");
     ok &= expect(biteauth::redisSessionKeyForToken("vod-abc123") ==
                      "vod:session:vod-abc123", "Redis key has no Bearer prefix");
+
+    std::set<std::string> sessionTokens;
+    bool tokensValid = true;
+    for (int index = 0; index < 10000; ++index) {
+        std::string sessionToken;
+        std::string tokenError;
+        tokensValid &= bitesession::generateSessionToken(
+            sessionToken, tokenError);
+        tokensValid &= sessionToken.size() == 68 &&
+            sessionToken.rfind("vod-", 0) == 0;
+        for (std::size_t offset = 4; offset < sessionToken.size(); ++offset) {
+            const unsigned char ch = sessionToken[offset];
+            tokensValid &= std::isdigit(ch) || (ch >= 'a' && ch <= 'f');
+        }
+        sessionTokens.insert(std::move(sessionToken));
+    }
+    ok &= expect(tokensValid && sessionTokens.size() == 10000,
+                 "session tokens use 32 random bytes, safe hex, and are unique");
+
+    std::string failedToken = "must-be-cleared";
+    std::string failedTokenError;
+    ok &= expect(
+        !bitesession::generateSessionToken(
+            [](unsigned char*, std::size_t) { return false; }, failedToken,
+            failedTokenError) &&
+            failedToken.empty() && !failedTokenError.empty(),
+        "RAND_bytes failure returns an error without a weak fallback token");
 
     std::string passwordHash;
     std::string secondPasswordHash;

@@ -736,7 +736,22 @@ int main() {
                          !uploadedPath.empty() &&
                          uploadedPlayPath == "/" + uploadedPath &&
                          !(*body)["video"]["storedCoverPath"].asString().empty(),
-                     "POST /videos/upload saves file and metadata");
+                      "POST /videos/upload saves file and metadata");
+    }
+
+    const auto uploadedAgain = client.Post("/videos/upload", uploadItems);
+    std::string secondUploadedPath;
+    if (uploadedAgain) {
+        const auto body = biteutil::JSON::unserialize(uploadedAgain->body);
+        secondUploadedPath = body
+            ? (*body)["video"]["storedVideoPath"].asString() : "";
+        ok &= expect(
+            body && (*body)["success"].asBool() &&
+                !secondUploadedPath.empty() &&
+                secondUploadedPath != uploadedPath &&
+                std::filesystem::exists(uploadedPath) &&
+                std::filesystem::exists(secondUploadedPath),
+            "same-account same-name uploads use different stored paths");
     }
 
     if (!uploadedId.empty() && !uploadedPath.empty()) {
@@ -1276,12 +1291,11 @@ int main() {
     serverThread.join();
 
     FakeRepositories strictStore;
-    bitesession::RedisSessionManager strictSessions;
     const biterepo::RepositorySet strictRepositories{
         &strictStore, &strictStore, &strictStore, &strictStore};
     biteserver::HttpServer strictServer(
         strictRepositories, biteserver::ServiceRole::All, "strict_test",
-        &strictSessions, true);
+        nullptr, true);
     const int strictPort = strictServer.bindToAnyPort("127.0.0.1");
     ok &= expect(strictPort > 0, "bind strict-auth test server");
     if (strictPort > 0) {
@@ -1305,13 +1319,40 @@ int main() {
             R"({"videoId":"video-001","account":"other-user"})",
             "application/json");
         ok &= expect(likeAsOther && likeAsOther->status == 403,
-                     "user A cannot like with user B in the body");
+                     "Alice cannot like with Bob in the body without Redis");
+        const auto favoriteAsOther = strictClient.Post(
+            "/videos/favorite", userHeaders,
+            R"({"videoId":"video-001","account":"other-user"})",
+            "application/json");
+        ok &= expect(
+            favoriteAsOther && favoriteAsOther->status == 403,
+            "Alice cannot favorite with Bob in the body without Redis");
+        const auto progressAsOther = strictClient.Post(
+            "/videos/watch-progress", userHeaders,
+            R"({"videoId":"video-001","account":"other-user","seconds":42})",
+            "application/json");
+        ok &= expect(
+            progressAsOther && progressAsOther->status == 403,
+            "Alice cannot update Bob watch progress without Redis");
         const auto profileAsOther = strictClient.Post(
             "/users/profile", userHeaders,
             R"({"account":"other-user","userName":"越权","description":""})",
             "application/json");
         ok &= expect(profileAsOther && profileAsOther->status == 403,
-                     "user A cannot update user B profile");
+                     "Alice cannot update Bob profile without Redis");
+
+        const auto statusAsOther = strictClient.Get(
+            "/videos/like-status?videoId=video-001&account=other-user",
+            userHeaders);
+        ok &= expect(statusAsOther && statusAsOther->status == 403,
+                     "Alice cannot query Bob state without Redis");
+
+        const auto publishAsOther = strictClient.Post(
+            "/videos", userHeaders,
+            R"({"title":"越权发布","account":"other-user","category":"科技","videoFileName":"other.mp4"})",
+            "application/json");
+        ok &= expect(publishAsOther && publishAsOther->status == 403,
+                     "Alice cannot publish metadata as Bob without Redis");
 
         httplib::MultipartFormDataItems otherAvatar = {
             {"account", "other-user", "", "text/plain"},
@@ -1329,7 +1370,15 @@ int main() {
         const auto uploadAsOther = strictClient.Post(
             "/videos/upload", userHeaders, otherUpload);
         ok &= expect(uploadAsOther && uploadAsOther->status == 403,
-                     "user A cannot upload a video as user B");
+                     "Alice cannot upload a video as Bob without Redis");
+
+        const auto missingGatewayIdentity = strictClient.Post(
+            "/videos/like",
+            R"({"videoId":"video-001","account":"bit-user-001"})",
+            "application/json");
+        ok &= expect(
+            missingGatewayIdentity && missingGatewayIdentity->status == 401,
+            "strict mode rejects protected requests without gateway identity");
 
         const auto normalAdmin = strictClient.Get(
             "/admin/reviews", userHeaders);

@@ -6,6 +6,7 @@ add_executable(file_service
     source/svc_rpc.cc
     source/svc_sync.cc
     source/svc_mq.cc
+    ../common/session_token.cc
     ../common/config.cc
     ../common/util.cc
     ../common/bitelog.cc
@@ -17,5 +18,5 @@ target_include_directories(file_service PRIVATE
 )
 
 target_link_libraries(file_service PRIVATE
-    jsoncpp fmt spdlog cpp-httplib Threads::Threads
+    jsoncpp fmt spdlog cpp-httplib OpenSSL::Crypto Threads::Threads
 )

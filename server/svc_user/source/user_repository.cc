@@ -59,13 +59,10 @@ bool MySqlUserRepository::userProfile(
     std::optional<bitevideo::UserProfile>& profile,
     std::string& error) {
     profile.reset();
-    std::string escapedAccount;
-    if (!database_.escape(account, escapedAccount, error)) return false;
     std::vector<bitedb::Database::QueryRow> rows;
-    if (!database_.query(
+    if (!database_.queryPrepared(
             "SELECT account, user_name, description, avatar_path FROM users "
-            "WHERE account = '" + escapedAccount + "' LIMIT 1",
-            rows, error)) {
+            "WHERE account = ? LIMIT 1", {account}, rows, error)) {
         return false;
     }
     if (rows.empty()) return true;
@@ -83,19 +80,9 @@ bool MySqlUserRepository::updateUserProfile(
     std::string& error) {
     if (!userProfile(account, profile, error)) return false;
     if (!profile) return true;
-    std::string escapedAccount;
-    std::string escapedUserName;
-    std::string escapedDescription;
-    if (!database_.escape(account, escapedAccount, error) ||
-        !database_.escape(userName, escapedUserName, error) ||
-        !database_.escape(description, escapedDescription, error)) {
-        return false;
-    }
-    if (!database_.execute(
-            "UPDATE users SET user_name = '" + escapedUserName +
-                "', description = '" + escapedDescription +
-                "' WHERE account = '" + escapedAccount + "'",
-            error)) {
+    if (!database_.executePrepared(
+            "UPDATE users SET user_name = ?, description = ? "
+            "WHERE account = ?", {userName, description, account}, error)) {
         return false;
     }
     return userProfile(account, profile, error);
@@ -109,16 +96,9 @@ bool MySqlUserRepository::updateAvatarPath(const std::string& account,
     std::optional<bitevideo::UserProfile> profile;
     if (!userProfile(account, profile, error)) return false;
     if (!profile) return true;
-    std::string escapedAccount;
-    std::string escapedAvatarPath;
-    if (!database_.escape(account, escapedAccount, error) ||
-        !database_.escape(avatarPath, escapedAvatarPath, error)) {
-        return false;
-    }
-    if (!database_.execute(
-            "UPDATE users SET avatar_path = '" + escapedAvatarPath +
-                "' WHERE account = '" + escapedAccount + "'",
-            error)) {
+    if (!database_.executePrepared(
+            "UPDATE users SET avatar_path = ? WHERE account = ?",
+            {avatarPath, account}, error)) {
         return false;
     }
     updated = true;
@@ -134,13 +114,10 @@ bool MySqlUserRepository::passwordLogin(
     error.clear();
     if (account.empty() || password.empty()) return true;
 
-    std::string escapedAccount;
-    if (!database_.escape(account, escapedAccount, error)) return false;
     std::vector<bitedb::Database::QueryRow> rows;
-    if (!database_.query(
+    if (!database_.queryPrepared(
             "SELECT account, password, user_name, description, avatar_path "
-            "FROM users WHERE account = '" + escapedAccount + "' LIMIT 1",
-            rows, error)) {
+            "FROM users WHERE account = ? LIMIT 1", {account}, rows, error)) {
         return false;
     }
     if (rows.empty()) return true;
@@ -160,26 +137,18 @@ bool MySqlUserRepository::passwordLogin(
     if (verification.needsMigration) {
         std::string encoded;
         if (!biteauth::hashPassword(password, encoded, error)) return false;
-        std::string escapedEncoded;
-        std::string escapedStored;
-        if (!database_.escape(encoded, escapedEncoded, error) ||
-            !database_.escape(storedPassword, escapedStored, error)) {
-            return false;
-        }
         unsigned long long affected = 0;
-        if (!database_.executeAffected(
-                "UPDATE users SET password = '" + escapedEncoded +
-                    "' WHERE account = '" + escapedAccount +
-                    "' AND password = '" + escapedStored + "'",
+        if (!database_.executeAffectedPrepared(
+                "UPDATE users SET password = ? WHERE account = ? "
+                "AND password = ?", {encoded, account, storedPassword},
                 affected, error)) {
             return false;
         }
         if (affected == 0) {
             std::vector<bitedb::Database::QueryRow> currentRows;
-            if (!database_.query(
-                    "SELECT password FROM users WHERE account = '" +
-                        escapedAccount + "' LIMIT 1",
-                    currentRows, error)) {
+            if (!database_.queryPrepared(
+                    "SELECT password FROM users WHERE account = ? LIMIT 1",
+                    {account}, currentRows, error)) {
                 return false;
             }
             if (currentRows.empty() || currentRows.front().empty()) {

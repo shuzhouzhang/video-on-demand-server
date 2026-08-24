@@ -103,6 +103,7 @@ int FileServerBuilder::start() const {
     bitelog::bitelog_init(settings->log);
 
     httplib::Server server;
+    server.set_payload_max_length(80 * 1024 * 1024);
     CacheDelete cacheDelete;
     (void)cacheDelete;
 

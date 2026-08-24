@@ -2,10 +2,9 @@
 
 #include "config.h"
 
+#include <memory>
 #include <optional>
 #include <string>
-
-struct redisContext;
 
 namespace bitesession {
 
@@ -29,8 +28,10 @@ public:
     bool deleteToken(const std::string& token, std::string& error);
 
 private:
+    struct Impl;
+
     biteconfig::RedisSettings settings_;
-    redisContext* context_ = nullptr;
+    std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace bitesession

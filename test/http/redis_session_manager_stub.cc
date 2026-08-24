@@ -1,9 +1,11 @@
 #include "../../server/common/redis_session_manager.h"
 
 namespace bitesession {
-RedisSessionManager::RedisSessionManager() = default;
+struct RedisSessionManager::Impl {};
+RedisSessionManager::RedisSessionManager()
+    : impl_(std::make_unique<Impl>()) {}
 RedisSessionManager::RedisSessionManager(const biteconfig::RedisSettings& settings)
-    : settings_(settings) {}
+    : settings_(settings), impl_(std::make_unique<Impl>()) {}
 RedisSessionManager::~RedisSessionManager() = default;
 bool RedisSessionManager::connect(std::string& error) { error.clear(); return true; }
 bool RedisSessionManager::enabled() const { return false; }

@@ -7,10 +7,12 @@ namespace svc_user {
 UserRpcService::UserRpcService(
     biterepo::IUserRepository& userRepository,
     biterepo::IAdminRepository& adminRepository,
-    bitesession::RedisSessionManager* sessions)
+    bitesession::RedisSessionManager* sessions,
+    bool enforceGatewayIdentity)
     : userRepository_(userRepository),
       adminRepository_(adminRepository),
-      sessions_(sessions) {}
+      sessions_(sessions),
+      enforceGatewayIdentity_(enforceGatewayIdentity) {}
 
 int UserRpcService::listen(const std::string& host, std::uint16_t port) {
     biterepo::RepositorySet repositories;
@@ -19,7 +21,8 @@ int UserRpcService::listen(const std::string& host, std::uint16_t port) {
     biteserver::HttpServer server(repositories,
                                   biteserver::ServiceRole::User,
                                   "user_service",
-                                  sessions_);
+                                  sessions_,
+                                  enforceGatewayIdentity_);
     if (!server.listen(host, port)) {
         ERR("user_service failed to listen on port {}", port);
         return 1;

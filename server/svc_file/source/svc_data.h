@@ -20,7 +20,7 @@ public:
                            std::string& error) const;
 
     static constexpr std::size_t maxFileBytes() noexcept {
-        return 200 * 1024 * 1024;
+        return 64 * 1024 * 1024;
     }
 };
 

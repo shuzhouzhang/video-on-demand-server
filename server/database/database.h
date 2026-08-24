@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,18 @@ public:
     bool query(const std::string& sql,
                std::vector<QueryRow>& rows,
                std::string& error);
+    bool executePrepared(const std::string& sql,
+                         const std::vector<std::string>& parameters,
+                         std::string& error);
+    bool executeAffectedPrepared(
+        const std::string& sql,
+        const std::vector<std::string>& parameters,
+        unsigned long long& affectedRows,
+        std::string& error);
+    bool queryPrepared(const std::string& sql,
+                       const std::vector<std::string>& parameters,
+                       std::vector<QueryRow>& rows,
+                       std::string& error);
     bool escape(const std::string& input,
                 std::string& escaped,
                 std::string& error);
@@ -49,11 +62,23 @@ public:
                             std::string& error);
     // 在同一事务中执行变更；只有首条语句真正改变数据时才执行后续语句。
     bool executeIfChanged(const std::string& changeSql,
-                          const std::string& followupSql,
-                          bool& changed,
-                          std::string& error);
+                           const std::string& followupSql,
+                           bool& changed,
+                           std::string& error);
+    bool executeIfChangedPrepared(
+        const std::string& changeSql,
+        const std::vector<std::string>& changeParameters,
+        const std::string& followupSql,
+        const std::vector<std::string>& followupParameters,
+        bool& changed,
+        std::string& error);
 
 private:
+    // connect() takes the exclusive lock; request operations take a shared
+    // lock and then borrow a distinct ODB pooled connection. The server calls
+    // connect only during startup, but the lock also makes that lifetime rule
+    // mechanically safe.
+    mutable std::shared_mutex databaseMutex_;
     std::unique_ptr<odb::mysql::database> database_;
 };
 

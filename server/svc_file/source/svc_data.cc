@@ -1,10 +1,12 @@
 #include "svc_data.h"
+#include "../../common/session_token.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
-#include <ctime>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
-#include <fstream>
 
 namespace {
 
@@ -32,13 +34,17 @@ bool writeBinaryFile(const std::filesystem::path& path,
         error = "创建目录失败: " + ec.message();
         return false;
     }
-    std::ofstream out(path, std::ios::binary);
+    std::FILE* out = std::fopen(path.string().c_str(), "wbx");
     if (!out) {
-        error = "打开文件失败: " + path.string();
+        error = "打开文件失败: " + std::string(std::strerror(errno));
         return false;
     }
-    out.write(content.data(), static_cast<std::streamsize>(content.size()));
-    if (!out) {
+    const std::size_t written =
+        std::fwrite(content.data(), 1, content.size(), out);
+    const bool closed = std::fclose(out) == 0;
+    if (written != content.size() || !closed) {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
         error = "写入文件失败: " + path.string();
         return false;
     }
@@ -62,8 +68,13 @@ bool FileDataFacade::storeUploadedFile(const std::string& directory,
     }
 
     const std::string safeDirectory = safeSegment(directory);
-    const std::string prefix =
-        std::to_string(std::time(nullptr)) + "-" + safeSegment(originalName);
+    const std::filesystem::path originalPath(originalName);
+    const std::string extension = originalPath.extension().string();
+    const std::string safeName = safeSegment(originalPath.stem().string()) +
+        extension;
+    std::string uploadToken;
+    if (!bitesession::generateSessionToken(uploadToken, error)) return false;
+    const std::string prefix = uploadToken.substr(4, 32) + "-" + safeName;
     const std::filesystem::path storedPath =
         std::filesystem::path("uploads") / safeDirectory / prefix;
 

@@ -11,6 +11,8 @@
 #include <jsoncpp/json/json.h>
 
 #include <atomic>
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
@@ -18,6 +20,7 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -27,6 +30,36 @@ struct GatewaySettings {
 };
 
 std::atomic<unsigned long long> g_requestCounter{0};
+
+std::string trimAscii(std::string value) {
+    const auto notSpace = [](unsigned char ch) {
+        return std::isspace(ch) == 0;
+    };
+    value.erase(value.begin(),
+                std::find_if(value.begin(), value.end(), notSpace));
+    value.erase(std::find_if(value.rbegin(), value.rend(), notSpace).base(),
+                value.end());
+    return value;
+}
+
+void stripHopByHopHeaders(httplib::Headers& headers) {
+    std::vector<std::string> connectionOptions;
+    const auto range = headers.equal_range("Connection");
+    for (auto it = range.first; it != range.second; ++it) {
+        std::stringstream values(it->second);
+        std::string value;
+        while (std::getline(values, value, ',')) {
+            value = trimAscii(value);
+            if (!value.empty()) connectionOptions.push_back(value);
+        }
+    }
+    const char* hopByHop[] = {
+        "Connection", "Keep-Alive", "Proxy-Authenticate",
+        "Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding",
+        "Upgrade"};
+    for (const char* name : hopByHop) headers.erase(name);
+    for (const auto& name : connectionOptions) headers.erase(name);
+}
 
 void setJsonResponse(httplib::Response& response,
                      int status,
@@ -158,10 +191,15 @@ bool verifyTokenIfNeeded(bitesession::RedisSessionManager& sessions,
         setJsonResponse(response, 200, body);
         return false;
     }
-    if (result.status == biteauth::GatewayAuthStatus::Unauthorized ||
-        result.status == biteauth::GatewayAuthStatus::SessionAbsent) {
+    if (result.status == biteauth::GatewayAuthStatus::Unauthorized) {
         body["success"] = false;
-        body["message"] = "unauthorized";
+        body["message"] = "invalid authorization header";
+        setJsonResponse(response, 401, body);
+        return false;
+    }
+    if (result.status == biteauth::GatewayAuthStatus::SessionAbsent) {
+        body["success"] = false;
+        body["message"] = "invalid or expired session token";
         setJsonResponse(response, 401, body);
         return false;
     }
@@ -192,6 +230,7 @@ void forwardToDownstream(const GatewaySettings& settings,
     const bitehttp::HttpClient client(downstream.baseUrl, settings.discovery.timeoutMs);
 
     httplib::Headers headers = request.headers;
+    stripHopByHopHeaders(headers);
     headers.erase("Host");
     headers.erase("Content-Length");
     headers.erase("Content-Type");
@@ -223,6 +262,10 @@ void forwardToDownstream(const GatewaySettings& settings,
 
     response.status = downstreamResponse.status;
     response.headers = downstreamResponse.headers;
+    stripHopByHopHeaders(response.headers);
+    response.headers.erase("Content-Length");
+    response.headers.erase("Content-Type");
+    response.headers.erase("X-Request-Id");
     response.set_header("X-Request-Id", requestId);
     response.set_content(downstreamResponse.body,
                          downstreamResponse.contentType.empty()
@@ -257,11 +300,14 @@ int GatewayServerBuilder::start() const {
 
     bitesession::RedisSessionManager sessions(settings.discovery.redis);
     if (!sessions.connect(error)) {
-        std::cerr << "api_gateway Redis 连接失败: " << error << '\n';
-        return 1;
+        // Keep the gateway available so protected routes return 503 and the
+        // session manager can reconnect on a later request after Redis heals.
+        std::cerr << "api_gateway Redis 连接失败，将在请求时重试: "
+                  << error << '\n';
     }
 
     httplib::Server server;
+    server.set_payload_max_length(80 * 1024 * 1024);
     server.Get("/health", [](const httplib::Request&, httplib::Response& response) {
         Json::Value body;
         body["code"] = 0;

@@ -99,10 +99,26 @@ Redis token -> account
   绕过 Gateway 且缺少内部身份返回 401，客户端 account 不一致返回 403。
 - Docker 用户/视频服务默认启用严格身份绑定。`*.local.json` 中的 false
   仅用于没有 Redis 的本地演示和旧 Qt 请求兼容，不是生产安全配置。
+- `X-Authenticated-Account` / `X-Gateway-Verified` 是内部信任头。下游服务
+  不应直接暴露给不可信网络；生产环境应只允许 Gateway 所在网段访问下游端口。
 - 管理接口在严格模式查询 `users.role/status`，只允许状态为“启用”的
   “管理员”或“超级管理员”，不读取客户端 role。
 - 公开视频统一要求 `status=1 AND review_status='审核通过' AND transcode_status='READY'`。新上传的
   待审核视频仍返回创建结果，并可由本人通过 `/users/videos` 查看。
+
+### 上传内存边界
+
+当前 cpp-httplib 版本支持 content receiver，但 Gateway 为兼容现有 Qt
+multipart 请求仍会从 `Request::files` 重建下游请求，因此端到端仍是内存型上传。
+在完整流式改造前，视频/通用文件上限已降为 64 MiB，HTTP 请求体总上限为
+80 MiB；服务会在解析前拒绝更大的请求。文件名使用密码学随机后缀并以排他
+创建方式写入，保留原扩展名，不会覆盖同名文件。
+
+### Docker 开发凭据
+
+`docker-compose.yml` 中的 MySQL 密码仅为本地开发示例，不得直接用于生产。
+生产部署必须通过 secret 管理设施注入独立强密码，并限制 MySQL、Redis 和
+所有下游服务端口只在内部网络可达。
 
 ### 密码存储
 

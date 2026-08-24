@@ -32,9 +32,6 @@ public:
                std::string serviceName);
     HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
                std::string serviceName,
-               bitesession::RedisSessionManager* sessionManager);
-    HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
-               std::string serviceName,
                bitesession::RedisSessionManager* sessionManager,
                bool enforceGatewayIdentity);
 

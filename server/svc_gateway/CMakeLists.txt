@@ -8,6 +8,7 @@ add_executable(api_gateway
     ../common/config.cc
     ../common/service_registry.cc
     ../common/redis_session_manager.cc
+    ../common/session_token.cc
     ../common/util.cc
     ../common/bitelog.cc
 )
@@ -18,5 +19,5 @@ target_include_directories(api_gateway PRIVATE
 )
 
 target_link_libraries(api_gateway PRIVATE
-    jsoncpp fmt spdlog cpp-httplib hiredis Threads::Threads
+    jsoncpp fmt spdlog cpp-httplib hiredis OpenSSL::Crypto Threads::Threads
 )

@@ -12,6 +12,7 @@ RUN apt-get update && \
     libfmt-dev \
     libhiredis-dev \
     libjsoncpp-dev \
+    libssl-dev \
     libodb-dev \
     libodb-mysql-dev \
     libspdlog-dev \

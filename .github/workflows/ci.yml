@@ -1,0 +1,81 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential default-libmysqlclient-dev libcpp-httplib-dev \
+            libfmt-dev libhiredis-dev libjsoncpp-dev libodb-dev \
+            libodb-mysql-dev libspdlog-dev libssl-dev python3
+      - name: Build services
+        run: make -j2 microservices
+      - name: Auth tests
+        run: make -C test/auth test
+      - name: HTTP contract and identity tests
+        run: make -C test/http test
+      - name: Database and repository tests
+        run: |
+          make -C test/database test
+          make -C test/repository test
+      - name: Transcode tests
+        run: make -C test/transcode test
+      - name: Remaining unit and route tests
+        run: |
+          make -C test/util test
+          make -C test/config test
+          make audit-routes
+
+  mysql-redis-integration:
+    runs-on: ubuntu-24.04
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root_password
+          MYSQL_DATABASE: video_on_demand
+          MYSQL_USER: video_app
+          MYSQL_PASSWORD: video_app_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot_password"
+          --health-interval=5s --health-timeout=3s --health-retries=30
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping" --health-interval=5s
+          --health-timeout=3s --health-retries=30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install integration dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential default-libmysqlclient-dev default-mysql-client \
+            libcpp-httplib-dev libfmt-dev libhiredis-dev libjsoncpp-dev \
+            libodb-dev libodb-mysql-dev libspdlog-dev libssl-dev
+      - name: Apply MySQL migrations
+        env:
+          MYSQL_PWD: video_app_password
+        run: |
+          for file in migrations/*.sql; do
+            mysql --protocol=TCP -h 127.0.0.1 -P 3306 -u video_app \
+              video_on_demand < "$file"
+          done
+      - name: Redis concurrency integration
+        run: make integration-redis
+      - name: Gateway Redis failure classification
+        run: make integration-gateway-auth
+      - name: MySQL, Redis, repository and transcode integration
+        run: make integration-mysql

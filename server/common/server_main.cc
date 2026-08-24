@@ -32,7 +32,9 @@ int main(int argc, char* argv[]) {
     biterepo::MySqlAdminRepository admins(database);
     const biterepo::RepositorySet repositories{
         &users, &videos, &videos, &admins};
-    biteserver::HttpServer server(repositories);
+    biteserver::HttpServer server(
+        repositories, biteserver::ServiceRole::All, "video_server", nullptr,
+        settings->auth.enforceGatewayIdentity);
     if (!server.listen("0.0.0.0", settings->server.port)) {
         ERR("HTTP server failed to listen on port {}", settings->server.port);
         return 1;

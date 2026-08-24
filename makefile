@@ -1,4 +1,4 @@
-.PHONY: server migrate microservices transcode_service test audit-routes smoke dev-start dev-stop dev-status dev-smoke dev-smoke-write dev-start-ms dev-stop-ms dev-status-ms dev-smoke-ms dev-smoke-write-ms clean
+.PHONY: server migrate microservices transcode_service test integration-test integration-redis integration-mysql integration-gateway-auth redis-tsan audit-routes smoke dev-start dev-stop dev-status dev-smoke dev-smoke-write dev-start-ms dev-stop-ms dev-status-ms dev-smoke-ms dev-smoke-write-ms clean
 
 DEV_CONFIG ?= conf/server.local.json
 DEV_LOG ?= /tmp/video_server_dev.log
@@ -17,6 +17,7 @@ BASE_URL ?= http://127.0.0.1:10000
 CORE_SOURCES = server/common/auth.cc server/common/email_verification.cc \
 		server/common/config.cc \
 		server/common/redis_session_manager.cc \
+		server/common/session_token.cc \
 		server/database/database.cc \
 		server/data/video.cc server/repository/admin_repository.cc \
 		server/common/util.cc \
@@ -51,9 +52,10 @@ video_service: server/svc_video/source/main.cc server/svc_video/source/svc_serve
 file_service: server/svc_file/source/main.cc server/svc_file/source/svc_server.cc \
 		server/svc_file/source/svc_data.cc server/svc_file/source/svc_rpc.cc \
 		server/svc_file/source/svc_sync.cc server/svc_file/source/svc_mq.cc \
-		server/common/config.cc server/common/util.cc server/common/bitelog.cc
+		server/common/session_token.cc server/common/config.cc \
+		server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o file_service \
-		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -pthread
+		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -lcrypto -pthread
 
 transcode_service: server/svc_transcode/source/main.cc \
 		server/svc_transcode/source/svc_server.cc \
@@ -74,10 +76,11 @@ api_gateway: server/svc_gateway/source/main.cc \
 		server/svc_gateway/source/svc_server.cc \
 		server/svc_gateway/source/svc_data.cc server/svc_gateway/source/svc_rpc.cc \
 		server/common/http_client.cc server/common/auth.cc server/common/config.cc server/common/service_registry.cc \
-		server/common/redis_session_manager.cc server/common/util.cc server/common/bitelog.cc
+		server/common/redis_session_manager.cc server/common/session_token.cc \
+		server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o api_gateway \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib \
-		-lhiredis -pthread
+		-lhiredis -lcrypto -pthread
 
 microservices: api_gateway user_service video_service file_service transcode_service
 
@@ -96,6 +99,21 @@ test:
 	$(MAKE) -C test/database test
 	$(MAKE) -C test/repository test
 	$(MAKE) -C test/transcode test
+
+integration-test:
+	$(MAKE) -C test/integration test
+
+integration-redis:
+	$(MAKE) -C test/integration redis
+
+integration-mysql:
+	$(MAKE) -C test/integration mysql
+
+integration-gateway-auth: api_gateway
+	$(MAKE) -C test/integration gateway-auth
+
+redis-tsan:
+	$(MAKE) -C test/integration redis-tsan
 
 # Check whether the backend still covers the expected client route contract.
 audit-routes:
@@ -192,6 +210,7 @@ clean:
 	$(MAKE) -C test/database clean
 	$(MAKE) -C test/repository clean
 	$(MAKE) -C test/transcode clean
+	$(MAKE) -C test/integration clean
 	$(MAKE) -C example/spdlog clean
 	rm -f video_server
 	rm -f api_gateway

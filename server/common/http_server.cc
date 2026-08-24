@@ -4,14 +4,16 @@
 #include "bitelog.h"
 #include "email_verification.h"
 #include "redis_session_manager.h"
+#include "session_token.h"
 #include "util.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
-#include <ctime>
+#include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <utility>
 
 namespace biteserver {
@@ -274,13 +276,19 @@ bool writeBinaryFile(const std::filesystem::path& path,
         error = "创建目录失败: " + ec.message();
         return false;
     }
-    std::ofstream out(path, std::ios::binary);
+    // "xb" atomically creates a new file and refuses an existing path, so a
+    // collision can never silently truncate an earlier upload.
+    std::FILE* out = std::fopen(path.string().c_str(), "wbx");
     if (!out) {
-        error = "打开文件失败: " + path.string();
+        error = "打开文件失败: " + std::string(std::strerror(errno));
         return false;
     }
-    out.write(content.data(), static_cast<std::streamsize>(content.size()));
-    if (!out) {
+    const std::size_t written =
+        std::fwrite(content.data(), 1, content.size(), out);
+    const bool closed = std::fclose(out) == 0;
+    if (written != content.size() || !closed) {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
         error = "写入文件失败: " + path.string();
         return false;
     }
@@ -356,19 +364,13 @@ bool draftFromJson(const Json::Value& payload,
 }  // namespace
 
 HttpServer::HttpServer(biterepo::RepositorySet repositories)
-    : HttpServer(repositories, ServiceRole::All, "video_server", nullptr) {
+    : HttpServer(repositories, ServiceRole::All, "video_server", nullptr,
+                 false) {
 }
 
 HttpServer::HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
                        std::string serviceName)
-    : HttpServer(repositories, role, std::move(serviceName), nullptr) {
-}
-
-HttpServer::HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
-                       std::string serviceName,
-                       bitesession::RedisSessionManager* sessionManager)
-    : HttpServer(repositories, role, std::move(serviceName), sessionManager,
-                 sessionManager != nullptr) {
+    : HttpServer(repositories, role, std::move(serviceName), nullptr, false) {
 }
 
 HttpServer::HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
@@ -380,6 +382,10 @@ HttpServer::HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
       serviceName_(std::move(serviceName)),
       sessionManager_(sessionManager),
       enforceGatewayIdentity_(enforceGatewayIdentity) {
+    // cpp-httplib 0.14 has a streaming receiver API, but the current Gateway
+    // compatibility path reconstructs multipart data from Request::files.
+    // Bound the aggregate body until both hops can be changed together.
+    server_.set_payload_max_length(80 * 1024 * 1024);
     std::error_code ignored;
     std::filesystem::create_directories("uploads", ignored);
     server_.set_mount_point("/uploads", "uploads");
@@ -420,12 +426,16 @@ void HttpServer::registerRoutes() {
     registerHealthRoutes();
 
     const bool all = role_ == ServiceRole::All;
-    const bool user = all || role_ == ServiceRole::User;
-    const bool video = all || role_ == ServiceRole::Video;
+    const bool user = (all || role_ == ServiceRole::User) &&
+        repositories_.users != nullptr;
+    const bool video = (all || role_ == ServiceRole::Video) &&
+        repositories_.videos != nullptr;
     const bool interaction =
-        all || role_ == ServiceRole::Video || role_ == ServiceRole::Interaction;
+        (all || role_ == ServiceRole::Video ||
+         role_ == ServiceRole::Interaction) &&
+        repositories_.interactions != nullptr;
 
-    if (smokeCleanupEnabled()) {
+    if (smokeCleanupEnabled() && repositories_.admins) {
         server_.Post("/__smoke-cleanup",
                      [this](const httplib::Request& request,
                             httplib::Response& response) {
@@ -600,7 +610,7 @@ void HttpServer::registerRoutes() {
     server_.Post("/videos/upload", [this](const httplib::Request& request,
                                           httplib::Response& response) {
         Json::Value body;
-        constexpr std::size_t MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+        constexpr std::size_t MAX_VIDEO_BYTES = 64 * 1024 * 1024;
         constexpr std::size_t MAX_COVER_BYTES = 10 * 1024 * 1024;
         if (!request.is_multipart_form_data()) {
             body["success"] = false;
@@ -667,9 +677,19 @@ void HttpServer::registerRoutes() {
             return;
         }
 
-        const std::string uploadPrefix =
-            safeAccountName(draft.account) + "-" +
-            std::to_string(std::time(nullptr)) + "-";
+        std::string uploadToken;
+        std::string error;
+        if (!bitesession::generateSessionToken(uploadToken, error)) {
+            if (bitelog::g_logger) {
+                ERR("upload path generation failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "视频文件保存失败";
+            setJsonResponse(response, 500, body);
+            return;
+        }
+        const std::string uploadPrefix = safeAccountName(draft.account) +
+            "-" + uploadToken.substr(4, 32) + "-";
         const std::filesystem::path videoPath =
             std::filesystem::path("uploads") / "videos" /
             (uploadPrefix + originalVideoName);
@@ -677,7 +697,6 @@ void HttpServer::registerRoutes() {
             std::error_code ignored;
             std::filesystem::remove(videoPath, ignored);
         };
-        std::string error;
         if (!writeBinaryFile(videoPath, videoPart.content, error)) {
             if (bitelog::g_logger) {
                 ERR("video file write failed: {}", error);
@@ -1867,9 +1886,20 @@ void HttpServer::registerRoutes() {
             return;
         }
 
+        std::string avatarToken;
+        if (!bitesession::generateSessionToken(avatarToken, error)) {
+            if (bitelog::g_logger) {
+                ERR("avatar path generation failed: {}", error);
+            }
+            body["success"] = false;
+            body["message"] = "头像保存失败";
+            setJsonResponse(response, 500, body);
+            return;
+        }
         const std::filesystem::path avatarPath =
             std::filesystem::path("uploads") / "avatars" /
-            (safeAccountName(account) + "-" + avatarName);
+            (safeAccountName(account) + "-" + avatarToken.substr(4, 32) +
+             "-" + avatarName);
         if (!writeBinaryFile(avatarPath, avatarPart.content, error)) {
             if (bitelog::g_logger) {
                 ERR("avatar file write failed: {}", error);
@@ -1883,6 +1913,8 @@ void HttpServer::registerRoutes() {
         bool updated = false;
         if (!repositories_.users->updateAvatarPath(
                 account, avatarPath.generic_string(), updated, error)) {
+            std::error_code ignored;
+            std::filesystem::remove(avatarPath, ignored);
             if (bitelog::g_logger) {
                 ERR("POST /users/avatar failed: {}", error);
             }
@@ -1890,6 +1922,8 @@ void HttpServer::registerRoutes() {
             body["message"] = "头像保存失败";
             setJsonResponse(response, 500, body);
         } else if (!updated) {
+            std::error_code ignored;
+            std::filesystem::remove(avatarPath, ignored);
             body["success"] = false;
             body["message"] = "用户不存在";
             setJsonResponse(response, 200, body);
@@ -1902,7 +1936,7 @@ void HttpServer::registerRoutes() {
     });
     }
 
-    if (video) {
+    if (video && repositories_.admins) {
     server_.Get("/admin/reviews", [this](const httplib::Request& request,
                                          httplib::Response& response) {
         if (!requireAdministrator(request, enforceGatewayIdentity_,
@@ -1969,7 +2003,7 @@ void HttpServer::registerRoutes() {
     });
     }
 
-    if (user) {
+    if (user && repositories_.admins) {
     server_.Get("/admin/users", [this](const httplib::Request& request,
                                       httplib::Response& response) {
         if (!requireAdministrator(request, enforceGatewayIdentity_,

@@ -13,6 +13,7 @@ add_executable(video_service
     ../common/email_verification.cc
     ../common/config.cc
     ../common/redis_session_manager.cc
+    ../common/session_token.cc
     ../common/util.cc
     ../common/bitelog.cc
     ../database/database.cc

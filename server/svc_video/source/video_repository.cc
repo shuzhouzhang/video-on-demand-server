@@ -1,10 +1,9 @@
 #include "video_repository.h"
 
 #include "../../common/util.h"
+#include "../../common/session_token.h"
 
 #include <filesystem>
-#include <iomanip>
-#include <sstream>
 
 namespace bitevideo {
 namespace {
@@ -133,12 +132,6 @@ bool profileFromRow(const bitedb::Database::QueryRow& row,
     return true;
 }
 
-std::string makeVideoId(unsigned long long nextId) {
-    std::ostringstream out;
-    out << "video-" << std::setw(3) << std::setfill('0') << nextId;
-    return out.str();
-}
-
 }  // namespace
 
 MySqlVideoRepository::MySqlVideoRepository(bitedb::Database& database)
@@ -169,25 +162,11 @@ bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
                                        std::optional<Video>& video,
                                        std::string& error) {
     video.reset();
-    std::vector<bitedb::Database::QueryRow> rows;
-    if (!database_.query("SELECT COALESCE(MAX(id), 0) + 1 FROM videos",
-                         rows, error)) {
-        return false;
-    }
-    if (rows.empty() || rows.front().empty()) {
-        error = "无法生成视频编号";
-        return false;
-    }
-
-    unsigned long long nextId = 0;
-    try {
-        nextId = std::stoull(valueOrEmpty(rows.front()[0]));
-    } catch (const std::exception&) {
-        error = "视频编号不是有效数字";
-        return false;
-    }
-
-    const std::string videoId = makeVideoId(nextId);
+    std::string randomToken;
+    if (!bitesession::generateSessionToken(randomToken, error)) return false;
+    // 128 random bits keeps the existing VARCHAR(64) business key compact
+    // while removing the MAX(id)+1 race between concurrent uploads.
+    const std::string videoId = "video-" + randomToken.substr(4, 32);
     const std::string sourcePath =
         draft.playUrl.empty() ? draft.videoFileName : draft.playUrl;
     const bool needsTranscode = isLocalUploadPath(sourcePath);
@@ -376,22 +355,14 @@ bool MySqlVideoRepository::likeStatus(
     std::optional<LikeStatus>& status,
     std::string& error) {
     status.reset();
-    std::string escapedVideoId;
-    std::string escapedAccount;
-    if (!database_.escape(videoId, escapedVideoId, error) ||
-        !database_.escape(account, escapedAccount, error)) {
-        return false;
-    }
-
     std::vector<bitedb::Database::QueryRow> rows;
     const std::string sql =
         "SELECT EXISTS(SELECT 1 FROM video_likes vl "
-        "WHERE vl.video_id = v.video_id AND vl.account = '" +
-        escapedAccount + "'), CAST(v.like_count AS CHAR) "
-        "FROM videos v WHERE v.video_id = '" + escapedVideoId +
-        "' AND v.status = 1 AND v.review_status = '审核通过' "
+        "WHERE vl.video_id = v.video_id AND vl.account = ?), "
+        "CAST(v.like_count AS CHAR) FROM videos v WHERE v.video_id = ? "
+        "AND v.status = 1 AND v.review_status = '审核通过' "
         "AND v.transcode_status = 'READY' LIMIT 1";
-    if (!database_.query(sql, rows, error)) {
+    if (!database_.queryPrepared(sql, {account, videoId}, rows, error)) {
         return false;
     }
     if (rows.empty()) {
@@ -420,26 +391,17 @@ bool MySqlVideoRepository::setLiked(
         return true;
     }
 
-    std::string escapedVideoId;
-    std::string escapedAccount;
-    if (!database_.escape(videoId, escapedVideoId, error) ||
-        !database_.escape(account, escapedAccount, error)) {
-        return false;
-    }
-
     const std::string changeSql = shouldLike
-        ? "INSERT IGNORE INTO video_likes (video_id, account) VALUES ('" +
-              escapedVideoId + "', '" + escapedAccount + "')"
-        : "DELETE FROM video_likes WHERE video_id = '" + escapedVideoId +
-              "' AND account = '" + escapedAccount + "'";
+        ? "INSERT IGNORE INTO video_likes (video_id, account) VALUES (?, ?)"
+        : "DELETE FROM video_likes WHERE video_id = ? AND account = ?";
     const std::string followupSql = shouldLike
-        ? "UPDATE videos SET like_count = like_count + 1 WHERE video_id = '" +
-              escapedVideoId + "'"
+        ? "UPDATE videos SET like_count = like_count + 1 WHERE video_id = ?"
         : "UPDATE videos SET like_count = GREATEST(like_count - 1, 0) "
-          "WHERE video_id = '" + escapedVideoId + "'";
+          "WHERE video_id = ?";
     bool changed = false;
-    if (!database_.executeIfChanged(
-            changeSql, followupSql, changed, error)) {
+    if (!database_.executeIfChangedPrepared(
+            changeSql, {videoId, account}, followupSql, {videoId}, changed,
+            error)) {
         return false;
     }
     return likeStatus(videoId, account, status, error);
@@ -451,22 +413,15 @@ bool MySqlVideoRepository::watchProgress(
     std::optional<WatchProgress>& progress,
     std::string& error) {
     progress.reset();
-    std::string escapedVideoId;
-    std::string escapedAccount;
-    if (!database_.escape(videoId, escapedVideoId, error) ||
-        !database_.escape(account, escapedAccount, error)) {
-        return false;
-    }
-
     std::vector<bitedb::Database::QueryRow> rows;
     const std::string sql =
         "SELECT COALESCE(wp.seconds, 0) FROM videos v "
         "LEFT JOIN video_watch_progress wp "
-        "ON wp.video_id = v.video_id AND wp.account = '" + escapedAccount +
-        "' WHERE v.video_id = '" + escapedVideoId +
-        "' AND v.status = 1 AND v.review_status = '审核通过' "
+        "ON wp.video_id = v.video_id AND wp.account = ? "
+        "WHERE v.video_id = ? AND v.status = 1 "
+        "AND v.review_status = '审核通过' "
         "AND v.transcode_status = 'READY' LIMIT 1";
-    if (!database_.query(sql, rows, error)) {
+    if (!database_.queryPrepared(sql, {account, videoId}, rows, error)) {
         return false;
     }
     if (rows.empty()) {
@@ -499,19 +454,11 @@ bool MySqlVideoRepository::saveWatchProgress(
         return true;
     }
 
-    std::string escapedVideoId;
-    std::string escapedAccount;
-    if (!database_.escape(videoId, escapedVideoId, error) ||
-        !database_.escape(account, escapedAccount, error)) {
-        return false;
-    }
-
-    const std::string secondsValue = std::to_string(seconds);
     const std::string sql =
         "INSERT INTO video_watch_progress (video_id, account, seconds) "
-        "VALUES ('" + escapedVideoId + "', '" + escapedAccount + "', " +
-        secondsValue + ") ON DUPLICATE KEY UPDATE seconds = VALUES(seconds)";
-    if (!database_.execute(sql, error)) {
+        "VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE seconds = VALUES(seconds)";
+    if (!database_.executePrepared(
+            sql, {videoId, account, std::to_string(seconds)}, error)) {
         return false;
     }
     return watchProgress(videoId, account, progress, error);
@@ -523,22 +470,14 @@ bool MySqlVideoRepository::favoriteStatus(
     std::optional<FavoriteStatus>& status,
     std::string& error) {
     status.reset();
-    std::string escapedVideoId;
-    std::string escapedAccount;
-    if (!database_.escape(videoId, escapedVideoId, error) ||
-        !database_.escape(account, escapedAccount, error)) {
-        return false;
-    }
-
     std::vector<bitedb::Database::QueryRow> rows;
     const std::string sql =
         "SELECT EXISTS(SELECT 1 FROM video_favorites vf "
-        "WHERE vf.video_id = v.video_id AND vf.account = '" +
-        escapedAccount + "') FROM videos v WHERE v.video_id = '" +
-        escapedVideoId +
-        "' AND v.status = 1 AND v.review_status = '审核通过' "
+        "WHERE vf.video_id = v.video_id AND vf.account = ?) "
+        "FROM videos v WHERE v.video_id = ? AND v.status = 1 "
+        "AND v.review_status = '审核通过' "
         "AND v.transcode_status = 'READY' LIMIT 1";
-    if (!database_.query(sql, rows, error)) {
+    if (!database_.queryPrepared(sql, {account, videoId}, rows, error)) {
         return false;
     }
     if (rows.empty()) {
@@ -566,19 +505,10 @@ bool MySqlVideoRepository::setFavorited(
         return true;
     }
 
-    std::string escapedVideoId;
-    std::string escapedAccount;
-    if (!database_.escape(videoId, escapedVideoId, error) ||
-        !database_.escape(account, escapedAccount, error)) {
-        return false;
-    }
-
     const std::string sql = shouldFavorite
-        ? "INSERT IGNORE INTO video_favorites (video_id, account) VALUES ('" +
-              escapedVideoId + "', '" + escapedAccount + "')"
-        : "DELETE FROM video_favorites WHERE video_id = '" + escapedVideoId +
-              "' AND account = '" + escapedAccount + "'";
-    if (!database_.execute(sql, error)) {
+        ? "INSERT IGNORE INTO video_favorites (video_id, account) VALUES (?, ?)"
+        : "DELETE FROM video_favorites WHERE video_id = ? AND account = ?";
+    if (!database_.executePrepared(sql, {videoId, account}, error)) {
         return false;
     }
     return favoriteStatus(videoId, account, status, error);

@@ -1,0 +1,13 @@
+{
+  "user_service": "http://user_service:10002",
+  "video_service": "http://video_service:10003",
+  "file_service": "http://file_service:10001",
+  "timeout_ms": 3000,
+  "redis": {
+    "enabled": true,
+    "host": "redis",
+    "port": 6379,
+    "session_ttl_seconds": 86400
+  },
+  "transcode_service": "http://transcode_service:10004"
+}

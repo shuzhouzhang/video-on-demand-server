@@ -1,0 +1,89 @@
+services:
+  mysql:
+    image: mysql/mysql-server:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: video_on_demand
+      MYSQL_USER: video_app
+      MYSQL_PASSWORD: video_app_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot_password"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: .
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: >
+      sh -c "make migrate &&
+      for file in migrations/*.sql; do ./database_migrate conf/server.docker.json $$file; done"
+
+  user_service:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    command: sh -c "make user_service && ./user_service conf/user_service.docker.json"
+    volumes:
+      - uploads_data:/app/uploads
+
+  video_service:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: sh -c "make video_service && ./video_service conf/video_service.docker.json"
+    volumes:
+      - uploads_data:/app/uploads
+
+  file_service:
+    build: .
+    command: sh -c "make file_service && ./file_service conf/file_service.docker.json"
+    volumes:
+      - uploads_data:/app/uploads
+
+
+  transcode_service:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: sh -c "make transcode_service && ./transcode_service conf/transcode_service.docker.json"
+    volumes:
+      - uploads_data:/app/uploads
+
+  gateway_service:
+    build: .
+    depends_on:
+      user_service:
+        condition: service_started
+      video_service:
+        condition: service_started
+      file_service:
+        condition: service_started
+      transcode_service:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    command: sh -c "make api_gateway && ./api_gateway conf/gateway.docker.json conf/services.docker.json"
+    ports:
+      - "10000:10000"
+
+volumes:
+  mysql_data:
+  uploads_data:

@@ -1,31 +1,222 @@
-.PHONY: server migrate test clean
+.PHONY: server migrate microservices transcode_service test integration-test integration-redis integration-mysql integration-gateway-auth redis-tsan audit-routes smoke dev-start dev-stop dev-status dev-smoke dev-smoke-write dev-start-ms dev-stop-ms dev-status-ms dev-smoke-ms dev-smoke-write-ms clean
 
-server: source/server_main.cc source/http_server.cc source/config.cc \
-		source/database.cc source/video.cc source/video_repository.cc \
-		source/util.cc source/bitelog.cc
+DEV_CONFIG ?= conf/server.local.json
+DEV_LOG ?= /tmp/video_server_dev.log
+GATEWAY_CONFIG ?= conf/gateway.local.json
+SERVICES_CONFIG ?= conf/services.local.json
+USER_SERVICE_CONFIG ?= conf/user_service.local.json
+VIDEO_SERVICE_CONFIG ?= conf/video_service.local.json
+FILE_SERVICE_CONFIG ?= conf/file_service.local.json
+TRANSCODE_SERVICE_CONFIG ?= conf/transcode_service.local.json
+GATEWAY_LOG ?= /tmp/api_gateway_dev.log
+USER_SERVICE_LOG ?= /tmp/user_service_dev.log
+VIDEO_SERVICE_LOG ?= /tmp/video_service_dev.log
+FILE_SERVICE_LOG ?= /tmp/file_service_dev.log
+TRANSCODE_SERVICE_LOG ?= /tmp/transcode_service_dev.log
+BASE_URL ?= http://127.0.0.1:10000
+CORE_SOURCES = server/common/auth.cc server/common/email_verification.cc \
+		server/common/config.cc \
+		server/common/redis_session_manager.cc \
+		server/common/session_token.cc \
+		server/database/database.cc \
+		server/data/video.cc server/repository/admin_repository.cc \
+		server/common/util.cc \
+		server/common/bitelog.cc
+USER_SOURCES = server/svc_user/source/user_repository.cc \
+		server/common/password_hash.cc
+VIDEO_SOURCES = server/svc_video/source/video_repository.cc
+COMMON_LIBS = -L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \
+		-lmysqlclient -lcpp-httplib -lhiredis -lcrypto -pthread
+
+server: server/common/server_main.cc server/common/http_server.cc \
+		$(CORE_SOURCES) $(USER_SOURCES) $(VIDEO_SOURCES)
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_server \
-		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \
-		-lmysqlclient -pthread
+		$(COMMON_LIBS)
 
-migrate: source/migrate_main.cc source/config.cc source/database.cc \
-		source/util.cc source/bitelog.cc
+user_service: server/svc_user/source/main.cc server/svc_user/source/svc_server.cc \
+		server/svc_user/source/svc_data.cc \
+		server/svc_user/source/svc_rpc.cc server/svc_user/source/svc_sync.cc \
+		server/svc_user/source/svc_mq.cc server/common/http_server.cc \
+		$(CORE_SOURCES) $(USER_SOURCES)
+	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o user_service \
+		$(COMMON_LIBS)
+
+video_service: server/svc_video/source/main.cc server/svc_video/source/svc_server.cc \
+		server/svc_video/source/svc_data.cc \
+		server/svc_video/source/svc_rpc.cc server/svc_video/source/svc_sync.cc \
+		server/svc_video/source/svc_mq.cc server/common/http_server.cc \
+		$(CORE_SOURCES) $(VIDEO_SOURCES)
+	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o video_service \
+		$(COMMON_LIBS)
+
+file_service: server/svc_file/source/main.cc server/svc_file/source/svc_server.cc \
+		server/svc_file/source/svc_data.cc server/svc_file/source/svc_rpc.cc \
+		server/svc_file/source/svc_sync.cc server/svc_file/source/svc_mq.cc \
+		server/common/session_token.cc server/common/config.cc \
+		server/common/util.cc server/common/bitelog.cc
+	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o file_service \
+		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -lcrypto -pthread
+
+transcode_service: server/svc_transcode/source/main.cc \
+		server/svc_transcode/source/svc_server.cc \
+		server/svc_transcode/source/svc_data.cc server/svc_transcode/source/svc_rpc.cc \
+		server/svc_transcode/source/svc_worker.cc server/common/auth.cc \
+		server/common/config.cc server/common/util.cc server/common/bitelog.cc \
+		server/database/database.cc
+	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o transcode_service \
+		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib -lodb-mysql \
+		-lodb -lmysqlclient -pthread
+
+interaction_service: source/service_main.cc source/http_server.cc \
+		$(CORE_SOURCES) $(VIDEO_SOURCES)
+	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o interaction_service \
+		$(COMMON_LIBS)
+
+api_gateway: server/svc_gateway/source/main.cc \
+		server/svc_gateway/source/svc_server.cc \
+		server/svc_gateway/source/svc_data.cc server/svc_gateway/source/svc_rpc.cc \
+		server/common/http_client.cc server/common/auth.cc server/common/config.cc server/common/service_registry.cc \
+		server/common/redis_session_manager.cc server/common/session_token.cc \
+		server/common/util.cc server/common/bitelog.cc
+	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o api_gateway \
+		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lcpp-httplib \
+		-lhiredis -lcrypto -pthread
+
+microservices: api_gateway user_service video_service file_service transcode_service
+
+migrate: server/database/migrate_main.cc server/common/config.cc \
+		server/database/database.cc server/common/util.cc server/common/bitelog.cc
 	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o database_migrate \
 		-L/usr/lib -ljsoncpp -lfmt -lspdlog -lodb-mysql -lodb \
-		-lmysqlclient -pthread
+		-lmysqlclient -lcpp-httplib -pthread
 
 # Run the project's current automated test suite from one stable entry point.
 test:
+	$(MAKE) -C test/auth test
 	$(MAKE) -C test/util test
 	$(MAKE) -C test/config test
 	$(MAKE) -C test/http test
 	$(MAKE) -C test/database test
+	$(MAKE) -C test/repository test
+	$(MAKE) -C test/transcode test
+
+integration-test:
+	$(MAKE) -C test/integration test
+
+integration-redis:
+	$(MAKE) -C test/integration redis
+
+integration-mysql:
+	$(MAKE) -C test/integration mysql
+
+integration-gateway-auth: api_gateway
+	$(MAKE) -C test/integration gateway-auth
+
+redis-tsan:
+	$(MAKE) -C test/integration redis-tsan
+
+# Check whether the backend still covers the expected client route contract.
+audit-routes:
+	python3 tools/audit_routes.py
+
+# Run a live smoke test against a running server.
+# Usage: make smoke BASE_URL=http://192.168.19.129:9000
+smoke:
+	python3 tools/smoke_api.py --base-url $(BASE_URL)
+
+# Compile and start the development server in the background.
+dev-start: server
+	@if [ ! -f "$(DEV_CONFIG)" ]; then \
+		echo "$(DEV_CONFIG) not found. Copy conf/server.json and fill database settings first."; \
+		exit 1; \
+	fi
+	@pkill -x video_server 2>/dev/null || true
+	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./video_server "$(DEV_CONFIG)" > "$(DEV_LOG)" 2>&1 < /dev/null
+	@sleep 1
+	@$(MAKE) dev-status
+
+# Stop the development server if it is running.
+dev-stop:
+	@pkill -x video_server 2>/dev/null || true
+	@echo "video_server stopped"
+
+# Show whether the development server is running and whether /health responds.
+dev-status:
+	@pgrep -a video_server || { echo "video_server is not running"; exit 1; }
+	@curl -fsS "$(BASE_URL)/health" >/dev/null && echo "health check ok: $(BASE_URL)"
+
+# Start the development server if needed, then run the live smoke test.
+dev-smoke:
+	@if ! pgrep -x video_server >/dev/null; then $(MAKE) dev-start; fi
+	@$(MAKE) smoke BASE_URL=$(BASE_URL)
+
+# Start the development server if needed, then verify upload/avatar/static files.
+dev-smoke-write:
+	@if ! pgrep -x video_server >/dev/null; then $(MAKE) dev-start; fi
+	@python3 tools/smoke_api.py --base-url $(BASE_URL) --write-checks
+
+# Compile and start the local lightweight microservice demo.
+dev-start-ms: microservices
+	@for file in "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" "$(USER_SERVICE_CONFIG)" "$(VIDEO_SERVICE_CONFIG)" "$(FILE_SERVICE_CONFIG)" "$(TRANSCODE_SERVICE_CONFIG)"; do \
+		if [ ! -f "$$file" ]; then echo "$$file not found."; exit 1; fi; \
+	done
+	@$(MAKE) dev-stop-ms >/dev/null || true
+	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./user_service "$(USER_SERVICE_CONFIG)" > "$(USER_SERVICE_LOG)" 2>&1 < /dev/null
+	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./video_service "$(VIDEO_SERVICE_CONFIG)" > "$(VIDEO_SERVICE_LOG)" 2>&1 < /dev/null
+	@VIDEO_ENABLE_SMOKE_CLEANUP=1 setsid -f ./file_service "$(FILE_SERVICE_CONFIG)" > "$(FILE_SERVICE_LOG)" 2>&1 < /dev/null
+	@setsid -f ./transcode_service "$(TRANSCODE_SERVICE_CONFIG)" > "$(TRANSCODE_SERVICE_LOG)" 2>&1 < /dev/null
+	@sleep 1
+	@setsid -f ./api_gateway "$(GATEWAY_CONFIG)" "$(SERVICES_CONFIG)" > "$(GATEWAY_LOG)" 2>&1 < /dev/null
+	@sleep 1
+	@$(MAKE) dev-status-ms
+
+# Stop the local lightweight microservice demo.
+dev-stop-ms:
+	@pkill -x api_gateway 2>/dev/null || true
+	@pkill -x user_service 2>/dev/null || true
+	@pkill -x video_service 2>/dev/null || true
+	@pkill -x file_service 2>/dev/null || true
+	@pkill -f '^\./transcode_service ' 2>/dev/null || true
+	@pkill -f '^\./interaction_service ' 2>/dev/null || true
+	@echo "microservices stopped"
+
+# Show whether all local microservice demo processes and health endpoints work.
+dev-status-ms:
+	@pgrep -a api_gateway || { echo "api_gateway is not running"; exit 1; }
+	@pgrep -a user_service || { echo "user_service is not running"; exit 1; }
+	@pgrep -a video_service || { echo "video_service is not running"; exit 1; }
+	@pgrep -a file_service || { echo "file_service is not running"; exit 1; }
+	@pgrep -af "\./transcode_service" || { echo "transcode_service is not running"; exit 1; }
+	@curl -fsS "http://127.0.0.1:10000/healthz" >/dev/null && echo "api_gateway healthz ok"
+	@curl -fsS "http://127.0.0.1:10002/healthz" >/dev/null && echo "user_service healthz ok"
+	@curl -fsS "http://127.0.0.1:10003/healthz" >/dev/null && echo "video_service healthz ok"
+	@curl -fsS "http://127.0.0.1:10001/healthz" >/dev/null && echo "file_service healthz ok"
+	@curl -fsS "http://127.0.0.1:10004/healthz" >/dev/null && echo "transcode_service healthz ok"
+
+dev-smoke-ms:
+	@if ! pgrep -x api_gateway >/dev/null; then $(MAKE) dev-start-ms; fi
+	@$(MAKE) smoke BASE_URL=$(BASE_URL)
+
+dev-smoke-write-ms:
+	@if ! pgrep -x api_gateway >/dev/null; then $(MAKE) dev-start-ms; fi
+	@python3 tools/smoke_api.py --base-url $(BASE_URL) --write-checks
 
 # Remove locally generated build artifacts.
 clean:
+	$(MAKE) -C test/auth clean
 	$(MAKE) -C test/util clean
 	$(MAKE) -C test/config clean
 	$(MAKE) -C test/http clean
 	$(MAKE) -C test/database clean
+	$(MAKE) -C test/repository clean
+	$(MAKE) -C test/transcode clean
+	$(MAKE) -C test/integration clean
 	$(MAKE) -C example/spdlog clean
 	rm -f video_server
+	rm -f api_gateway
+	rm -f user_service
+	rm -f video_service
+	rm -f file_service
+	rm -f transcode_service
+	rm -f interaction_service
 	rm -f database_migrate

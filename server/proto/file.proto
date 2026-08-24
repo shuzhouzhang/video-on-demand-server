@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package vod.api;
+
+import "base.proto";
+
+message UploadFileRequest {
+  string directory = 1;
+  string original_name = 2;
+  bytes content = 3;
+}
+
+message UploadFileResponse {
+  bool success = 1;
+  string message = 2;
+  FileInfo file = 3;
+}
+
+message DownloadFileRequest {
+  string public_url = 1;
+}
+
+message DownloadFileResponse {
+  bool success = 1;
+  string message = 2;
+  bytes content = 3;
+  string content_type = 4;
+}
+
+service FileService {
+  rpc UploadFile(UploadFileRequest) returns (UploadFileResponse);
+  rpc DownloadFile(DownloadFileRequest) returns (DownloadFileResponse);
+}

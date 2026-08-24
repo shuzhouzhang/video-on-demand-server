@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package vod.api;
+
+import "base.proto";
+
+message VideoListRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  string keyword = 3;
+}
+
+message VideoListResponse {
+  bool success = 1;
+  string message = 2;
+  repeated VideoInfo videos = 3;
+}
+
+message VideoDetailRequest {
+  int64 id = 1;
+}
+
+message VideoDetailResponse {
+  bool success = 1;
+  string message = 2;
+  VideoInfo video = 3;
+}
+
+message TranscodeJobRequest {
+  int64 video_id = 1;
+  string file_path = 2;
+}
+
+message TranscodeJobResponse {
+  bool success = 1;
+  string message = 2;
+  string status = 3;
+}
+
+service VideoService {
+  rpc ListVideos(VideoListRequest) returns (VideoListResponse);
+  rpc GetVideoDetail(VideoDetailRequest) returns (VideoDetailResponse);
+}
+
+service TranscodeService {
+  rpc SubmitTranscodeJob(TranscodeJobRequest) returns (TranscodeJobResponse);
+}

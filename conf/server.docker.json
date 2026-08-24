@@ -1,0 +1,24 @@
+{
+  "server": {
+    "port": 10000
+  },
+  "log": {
+    "async": false,
+    "level": 1,
+    "pattern": "[%H:%M:%S] [%-7l] %v",
+    "path": "stdout"
+  },
+  "database": {
+    "host": "mysql",
+    "port": 3306,
+    "user": "video_app",
+    "password": "video_app_password",
+    "name": "video_on_demand"
+  },
+  "redis": {
+    "enabled": true,
+    "host": "redis",
+    "port": 6379,
+    "session_ttl_seconds": 86400
+  }
+}

@@ -1,4 +1,4 @@
-#include "../../source/database.h"
+#include "../../server/database/database.h"
 
 #include <iostream>
 #include <string>
@@ -24,6 +24,15 @@ int main() {
     ok &= expect(!database.isConnected(), "database starts disconnected");
     ok &= expect(!database.ping(error) && !error.empty(),
                  "ping reports disconnected state");
+    unsigned long long affectedRows = 99;
+    ok &= expect(!database.executeAffected(
+                     "UPDATE email_login_codes SET consumed = 1",
+                     affectedRows, error) &&
+                     affectedRows == 0 && !error.empty(),
+                 "atomic affected-row execution rejects disconnected state");
+    ok &= expect(!database.executeTransaction({"SELECT 1"}, error) &&
+                     !error.empty(),
+                 "transaction execution rejects disconnected state");
 
     // 端口 1 不提供 MySQL 服务，用于稳定验证连接失败处理。
     const biteconfig::DatabaseSettings unavailable{

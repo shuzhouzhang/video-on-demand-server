@@ -1,0 +1,24 @@
+{
+  "server": {
+    "port": 10003
+  },
+  "log": {
+    "async": false,
+    "level": 1,
+    "pattern": "[%H:%M:%S] [%-7l] %v",
+    "path": "stdout"
+  },
+  "database": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "video_app",
+    "password": "",
+    "name": "video_on_demand"
+  },
+  "redis": {
+    "enabled": false
+  },
+  "auth": {
+    "enforce_gateway_identity": false
+  }
+}

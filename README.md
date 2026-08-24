@@ -1,44 +1,274 @@
 # video-on-demand-server
 
-C++ 视频点播服务端。项目目前完成了日志模块和通用工具模块，后续将在这个基线上逐步加入配置、数据库、HTTP API 与视频业务功能。
+C++17 视频点播服务端，面向 Qt 客户端提供 HTTP/JSON API。项目从原来的单体 `video_server` 逐步拆分为轻量微服务形态，同时保留原有业务接口，优先保证已有客户端功能可运行。
 
-## 当前模块
+## 项目介绍
 
-- `source/bitelog.*`：服务端日志初始化与输出封装。
-- `source/util.*`：JSON 转换、文件读写、字符串切分和随机值生成。
-- `source/config.*`：读取并校验服务端与日志 JSON 配置。
-- `source/http_server.*`：HTTP 服务与公共路由。
-- `source/database.*`：MySQL 连接与健康检查。
-- `source/video*`：视频模型、MySQL查询和客户端JSON转换。
-- `migrations/`：数据库表结构与可重复执行的种子数据。
-- `test/util/`：通用工具的自动化测试。
-- `test/config/`：配置读取与错误输入测试。
-- `test/http/`：HTTP 健康检查的端到端测试。
-- `test/database/`：数据库未连接和连接失败测试。
+当前已覆盖：
 
-## 验证
+- 用户注册/登录、邮箱验证码登录、退出登录
+- 用户资料、头像上传、后台用户管理
+- 视频列表、详情、搜索、播放地址
+- 视频发布、视频文件上传、封面上传
+- 点赞、收藏、评论、弹幕、观看进度
+- 视频审核
+- `/uploads/...` 文件访问
 
-在安装 `jsoncpp`、`fmt` 和 `spdlog` 开发库的 Linux 环境中运行：
+## 架构图
 
-```bash
-make clean
-make test
-make clean
+```text
+Qt Client
+    |
+HTTP/JSON
+    |
+gateway_service :10000
+    |
+    +--------------------+--------------------+--------------------+
+    |                    |                    |
+user_service :10002  video_service :10003  file_service :10001
+    |                    |                    |
+UserRepository       VideoRepository       FileRepository
+    |                    |                    |
+MySQL                MySQL/shared schema    shared uploads volume
+    |
+RedisSessionManager
+    |
+Redis
 ```
 
-启动服务并检查健康状态：
+保留兼容入口：
+
+```text
+video_server
+    |
+原单体 HttpServer + MySQL
+```
+
+## 服务说明
+
+- `gateway_service`：对外统一 HTTP 入口，负责路由转发、统一错误响应、请求 ID、Redis token 校验。
+- `user_service`：用户登录、邮箱验证码登录、退出登录、用户资料、头像资料更新、后台用户管理。
+- `video_service`：视频元数据、列表、详情、搜索、播放地址、点赞、收藏、评论、弹幕、观看进度、审核。
+- `file_service`：文件服务入口，提供 `/uploads/...` 下载和 `POST /files/upload` 通用文件上传；现有 `/videos/upload`、`/users/avatar` 为兼容 Qt 客户端仍保留原路径。
+- `transcode_service`：MySQL 持久化异步转码服务。视频上传与任务创建处于同一事务；worker 通过数据库租约原子领取任务，使用 FFmpeg 生成 H.264/AAC MP4，支持失败重试、进程重启恢复和状态查询，不依赖 MQ。
+- `common`：JSON、日志、配置、HTTP Client、ServiceRegistry、RedisSessionManager、CacheSync 同步接口等公共能力。
+- `data`：用户、视频、互动、审核、文件等跨服务领域模型。
+- `database`：MySQL 连接和迁移工具。
+
+## 请求流程
+
+登录流程：
+
+```text
+POST /login
+    |
+gateway_service
+    |
+user_service 校验账号密码
+    |
+RedisSessionManager 生成 token 并写入 Redis
+    |
+返回 account/userName/token
+```
+
+登录后请求：
+
+```text
+Qt Client
+    |
+Authorization: Bearer <token>
+    |
+gateway_service 删除客户端伪造的内部身份头
+    |
+Redis token -> account
+    |
+注入 X-Authenticated-Account + X-Gateway-Verified: 1
+    |
+下游绑定认证 account；兼容字段缺省时补齐、相异时返回 403
+```
+
+`Authorization` 和 `X-Request-Id` 继续转发。客户端传入的
+`X-Authenticated-Account`、`X-Authenticated-Role`、
+`X-Gateway-Verified` 会被 Gateway 无条件删除。
+
+## 安全运行模式
+
+- Redis/auth 开启时，受保护路由缺少或使用无效 Bearer token 返回 401，
+  Redis 查询异常返回 503。
+- 下游设置 `auth.enforce_gateway_identity=true` 后只信任 Gateway 身份；
+  绕过 Gateway 且缺少内部身份返回 401，客户端 account 不一致返回 403。
+- Docker 用户/视频服务默认启用严格身份绑定。`*.local.json` 中的 false
+  仅用于没有 Redis 的本地演示和旧 Qt 请求兼容，不是生产安全配置。
+- `X-Authenticated-Account` / `X-Gateway-Verified` 是内部信任头。下游服务
+  不应直接暴露给不可信网络；生产环境应只允许 Gateway 所在网段访问下游端口。
+- 管理接口在严格模式查询 `users.role/status`，只允许状态为“启用”的
+  “管理员”或“超级管理员”，不读取客户端 role。
+- 公开视频统一要求 `status=1 AND review_status='审核通过' AND transcode_status='READY'`。新上传的
+  待审核视频仍返回创建结果，并可由本人通过 `/users/videos` 查看。
+
+### 上传内存边界
+
+当前 cpp-httplib 版本支持 content receiver，但 Gateway 为兼容现有 Qt
+multipart 请求仍会从 `Request::files` 重建下游请求，因此端到端仍是内存型上传。
+在完整流式改造前，视频/通用文件上限已降为 64 MiB，HTTP 请求体总上限为
+80 MiB；服务会在解析前拒绝更大的请求。文件名使用密码学随机后缀并以排他
+创建方式写入，保留原扩展名，不会覆盖同名文件。
+
+### Docker 开发凭据
+
+`docker-compose.yml` 中的 MySQL 密码仅为本地开发示例，不得直接用于生产。
+生产部署必须通过 secret 管理设施注入独立强密码，并限制 MySQL、Redis 和
+所有下游服务端口只在内部网络可达。
+
+### 密码存储
+
+- 新密码使用 OpenSSL PBKDF2-HMAC-SHA256，当前迭代次数为 210000，
+  每次生成独立的 16 字节 CSPRNG salt。
+- 数据库存储格式为
+  `$pbkdf2-sha256$v=1$i=<iterations>$<salt-hex>$<digest-hex>`，便于后续升级
+  参数或算法。
+- 登录查询只按 account 读取密码摘要，不再在 SQL 中比较明文密码。
+- 历史明文账号仅作为迁移兼容：首次正确登录后通过条件 UPDATE 自动
+  换成版本化摘要；密码和完整摘要都不会写入日志。
+
+迁移前需执行：
 
 ```bash
-make server
 make migrate
-cp conf/server.json conf/server.local.json
-# 在 server.local.json 中填写本地数据库连接信息。
-./database_migrate conf/server.local.json migrations/001_create_videos.sql
-./video_server conf/server.local.json
-curl http://127.0.0.1:9000/health
-curl http://127.0.0.1:9000/videos
-curl 'http://127.0.0.1:9000/videos/detail?id=video-001'
-curl 'http://127.0.0.1:9000/videos/like-status?videoId=video-001&account=bit-user-001'
+./database_migrate conf/server.local.json \
+  migrations/013_harden_credentials_and_email_codes.sql
 ```
 
-`conf/server.local.json`包含本地凭据并已被 Git 忽略，不要将真实密码写入已跟踪的配置文件。
+### 邮箱验证码
+
+- 使用 OpenSSL CSPRNG 生成 6 位数字验证码和不可预测的 authcodeId。
+- 验证码有效期 10 分钟、最多失败 5 次、同一邮箱 60 秒内只允许发送一次。
+- 正确验证通过带 `consumed=0`、有效期和尝试次数条件的原子 UPDATE 消费；
+  只有一个并发请求能得到受影响行数 1。
+- 默认响应不含 `debugCode`。只有开发者显式设置
+  `VIDEO_ENABLE_EMAIL_DEBUG_CODE=1` 时才返回；生产环境不得设置该变量。
+
+文件访问：
+
+```text
+GET /uploads/...
+    |
+gateway_service
+    |
+file_service
+    |
+uploads 共享目录
+```
+
+## 数据库设计
+
+当前仍使用同一 MySQL schema，但数据访问已经拆成四个领域接口：
+
+- `IUserRepository`：登录、验证码、资料和头像。
+- `IVideoRepository`：公开视频、上传、详情、搜索和作者作品。
+- `IInteractionRepository`：点赞、收藏、进度、评论和弹幕。
+- `IAdminRepository`：管理员授权、审核和后台用户操作。
+
+`MySqlUserRepository` 直接实现 `IUserRepository`，不再继承
+`MySqlVideoRepository`。`user_service` 不链接视频 Repository 实现，
+`video_service` 不链接用户 Repository 实现；旧 `video_server` 通过
+`RepositorySet` 组合用户、视频/互动和管理员 Repository，继续保留原路由。
+
+主要表：
+
+- `users`：账号、版本化密码摘要、昵称、角色、状态、头像、资料。
+- `email_login_codes`：验证码、有效期、失败次数和消费状态。
+- `email_code_rate_limits`：按邮箱串行化发送频率租约。
+- `videos`：视频元数据、作者、播放地址、审核状态。
+- `video_likes`：点赞关系。
+- `video_favorites`：收藏关系。
+- `video_watch_progress`：观看进度。
+- `video_comments`：评论。
+- `video_barrages`：弹幕。
+
+## 本地构建
+
+```bash
+make microservices
+make dev-start-ms
+make dev-status-ms
+make dev-smoke-ms
+make dev-smoke-write-ms
+make dev-stop-ms
+```
+
+默认端口：
+
+```text
+gateway_service  10000
+file_service     10001
+user_service     10002
+video_service    10003
+transcode_service 10004
+```
+
+接口覆盖检查：
+
+```bash
+make audit-routes
+```
+
+自动测试：
+
+```bash
+make test
+```
+
+覆盖 Bearer 解析、Gateway 头清洗/身份注入、账号越权、管理员授权、
+logout 纯 token 与幂等性、待审核视频边界和上传后的内部回读。
+
+## Docker Compose 启动
+
+```bash
+docker compose up --build
+```
+
+启动组件：
+
+- `gateway_service`
+- `user_service`
+- `video_service`
+- `file_service`
+- `transcode_service`
+
+转码接口（均由网关校验登录身份，账号只能访问自己的任务）：
+
+- `POST /transcode/jobs`：为已有视频补建或重新排队任务，参数为 `videoId`；服务端从数据库读取源文件路径，不接受客户端指定任意文件路径。
+- `GET /transcode/jobs?videoId=...`：查询任务状态、尝试次数和最后错误。
+- `POST /transcode/jobs/retry`：将已失败或已完成的任务显式重新排队。
+
+上传到本地 `uploads` 目录的视频会自动创建 `PENDING` 任务。只有审核通过且 `transcode_status=READY` 的视频会进入公开列表和播放地址查询。Docker 镜像安装 FFmpeg，`video_service` 与 `transcode_service` 共享 `uploads_data` 卷。
+- `mysql`
+- `redis`
+- `migrate`
+
+访问：
+
+```bash
+curl http://127.0.0.1:10000/health
+curl http://127.0.0.1:10000/videos
+```
+
+## 技术亮点
+
+- C++17 轻量微服务拆分：先保留业务兼容，再逐步拆目录、入口、Repository 和公共库。
+- Gateway 设计：统一入口、路由转发、轻量服务发现、错误响应、请求 ID、Redis token 校验。
+- HTTP 内部调用：第一阶段不引入复杂 RPC，通过 `common/HttpClient` 封装下游调用。
+- Repository 模式：服务入口已经按用户、视频、文件建立独立 Repository 边界。
+- 公共 data 层：将视频、用户、互动、审核、文件 DTO 从服务实现中拆出，降低服务间模型耦合。
+- svc_sync 边界：对齐参考项目的缓存删除/缓存回写结构，当前提供本地可运行实现，后续可接入 MQ/Redis 延迟同步。
+- Redis 会话管理：登录成功生成 token，Redis 保存会话，gateway 校验登录状态。
+- Docker 部署：`docker compose up --build` 启动服务、MySQL、Redis 和数据库迁移。
+
+## 当前边界
+
+- 第一阶段仍是共享 MySQL schema，未强行引入分布式事务。
+- `/videos/upload` 和 `/users/avatar` 为兼容现有 Qt 客户端仍保留旧路径；`file_service` 已承接 `/uploads/...` 下载和通用 `/files/upload`。
+- 未引入 etcd 注册中心、真实消息队列、服务网格或复杂熔断组件，避免超出当前项目维护能力；服务发现通过 `ServiceRegistry` 配置抽象实现，其他边界已通过 `svc_sync`、`svc_mq`、`svc_worker` 预留。
+- 内部身份头依赖 Gateway 与下游的网络隔离；若下游未来跨不可信网络
+  暴露，需要增加 mTLS 或内部请求签名。

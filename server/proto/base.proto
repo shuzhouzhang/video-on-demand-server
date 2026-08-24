@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package vod.api;
+
+message UserInfo {
+  string account = 1;
+  string user_name = 2;
+  string avatar_url = 3;
+  string description = 4;
+  string role = 5;
+}
+
+message FileInfo {
+  string file_id = 1;
+  string original_name = 2;
+  string stored_path = 3;
+  string public_url = 4;
+  int64 size = 5;
+}
+
+message VideoInfo {
+  int64 id = 1;
+  string title = 2;
+  string description = 3;
+  string category = 4;
+  string uploader = 5;
+  string video_url = 6;
+  string cover_url = 7;
+  string review_status = 8;
+}
+
+message BarrageInfo {
+  int64 id = 1;
+  int64 video_id = 2;
+  string account = 3;
+  string content = 4;
+  int32 seconds = 5;
+}

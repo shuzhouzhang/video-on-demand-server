@@ -1,0 +1,35 @@
+{
+  "server": {
+    "port": 10004
+  },
+  "log": {
+    "async": false,
+    "level": 1,
+    "pattern": "[%H:%M:%S] [%-7l] %v",
+    "path": "stdout"
+  },
+  "database": {
+    "host": "mysql",
+    "port": 3306,
+    "user": "video_app",
+    "password": "video_app_password",
+    "name": "video_on_demand"
+  },
+  "redis": {
+    "enabled": false
+  },
+  "auth": {
+    "enforce_gateway_identity": true
+  },
+  "transcode": {
+    "enabled": true,
+    "worker_threads": 2,
+    "poll_interval_ms": 500,
+    "lease_seconds": 300,
+    "max_attempts": 3,
+    "retry_delay_seconds": 30,
+    "ffmpeg_path": "ffmpeg",
+    "upload_root": "uploads",
+    "output_root": "uploads/transcoded"
+  }
+}

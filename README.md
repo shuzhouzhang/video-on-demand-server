@@ -5,8 +5,8 @@ C++17 视频点播服务端，面向 Qt 客户端提供 HTTP/JSON API。项目�
 ## 项目介绍
 
 最新拆分说明和实测边界见 [服务拆分与参考项目对照](docs/reference-service-boundaries.md)。
-用户、视频与互动路由由各服务显式装配；登录、用户资料、视频列表、搜索和详情
-已走强类型业务 RPC，其余接口继续使用兼容桥接。
+用户、视频与互动路由由各服务显式装配；reference runtime 下的业务接口已接入具名 protobuf RPC。
+源文件、封面、头像和 HLS 清单/分片通过 FileService/FastDFS 对象 ID 流转，并验证了独立服务目录与故障恢复。
 
 当前已覆盖：
 
@@ -56,7 +56,7 @@ video_server
 - `user_service`：用户登录、邮箱验证码登录、退出登录、用户资料、头像资料更新、后台用户管理。
 - `video_service`：视频元数据、列表、详情、搜索、播放地址、点赞、收藏、评论、弹幕、观看进度、审核。
 - `file_service`：文件服务入口，提供 `/uploads/...` 下载和 `POST /files/upload` 通用文件上传；现有 `/videos/upload`、`/users/avatar` 为兼容 Qt 客户端仍保留原路径。
-- `transcode_service`：MySQL 持久化异步转码服务。任务与 RabbitMQ outbox 事件在同一事务写入；发布器使用 confirm 重试。开启 RabbitMQ 时由消息驱动 Worker，关闭时保留数据库轮询。当前生成 MP4，尚未实现 HLS 分片。
+- `transcode_service`：MySQL 持久化异步转码服务。任务与 RabbitMQ outbox 事件在同一事务写入；发布器使用 confirm 重试。RabbitMQ 唤醒 Worker，数据库扫描保障延迟重试和过期租约恢复。远程对象链路生成 HLS，兼容本地链路保留 MP4。
 - `common`：JSON、日志、配置、HTTP Client、ServiceRegistry、RedisSessionManager、CacheSync 同步接口等公共能力。
 - `data`：用户、视频、互动、审核、文件等跨服务领域模型。
 - `database`：MySQL 连接和迁移工具。
@@ -163,7 +163,8 @@ gateway_service
     |
 file_service
     |
-uploads 共享目录
+FastDFS 对象存储（reference runtime）
+或本地 uploads（portable 兼容配置）
 ```
 
 ## 数据库设计
@@ -263,12 +264,10 @@ make reference-infra-stop
 
 启动顺序为 etcd → RabbitMQ → Elasticsearch → FastDFS → MariaDB/Redis →
 业务服务 → Gateway。业务服务的 HTTP 应用层只监听 `127.0.0.1`，Gateway
-通过 etcd 获取 11001–11004 的 brpc 实例。迁移期未强类型化的旧路由通过
-`runtime.proto/InternalHttpService` 承载 protobuf RPC；文件上传和二进制下载
-使用 brpc attachment，不把大文件放进 protobuf `bytes`。
+通过 etcd 获取 11001–11004 的 brpc 实例。公开业务使用具名 RPC，文件数据使用
+protobuf bytes；HTTP/JSON 和 multipart 在 Gateway 转换。兼容桥接只保留给旧入口和开发工具。
+业务层复用验证和 Repository 操作，不经过本机 HTTP；响应头 `X-Vod-Rpc-Method` 验证方法选择。
 
-已强类型化的路由直接进入 `UserService` / `VideoService` 并调用 Repository，
-不经过本机 HTTP；响应头 `X-Vod-Rpc-Method` 可用于验证方法选择。
 完整中间件版构建后，可执行 `ctest --test-dir build/reference-runtime --output-on-failure`。
 不安装中间件时使用 `cmake -S server -B build/portable -DVOD_ENABLE_REFERENCE_RUNTIME=OFF`，
 再执行 `cmake --build build/portable --parallel 2`；这是不同的运行配置，不能拿它冒充 MQ/RPC 实测。
@@ -336,7 +335,7 @@ docker compose up --build
 - `GET /transcode/jobs?videoId=...`：查询任务状态、尝试次数和最后错误。
 - `POST /transcode/jobs/retry`：将已失败或已完成的任务显式重新排队。
 
-上传到本地 `uploads` 目录的视频会自动创建 `PENDING` 任务。只有审核通过且 `transcode_status=READY` 的视频会进入公开列表和播放地址查询。Docker 镜像安装 FFmpeg，`video_service` 与 `transcode_service` 共享 `uploads_data` 卷。
+Docker/portable 兼容配置中，上传到本地 `uploads` 目录的视频会自动创建 `PENDING` 任务。只有审核通过且 `transcode_status=READY` 的视频会进入公开列表和播放地址查询。Docker 镜像安装 FFmpeg，`video_service` 与 `transcode_service` 共享 `uploads_data` 卷。
 - `mysql`
 - `redis`
 - `migrate`
@@ -352,10 +351,10 @@ curl http://127.0.0.1:10000/videos
 
 - C++17 轻量微服务拆分：先保留业务兼容，再逐步拆目录、入口、Repository 和公共库。
 - Gateway 设计：统一入口、路由转发、轻量服务发现、错误响应、请求 ID、Redis token 校验。
-- HTTP 内部调用：第一阶段不引入复杂 RPC，通过 `common/HttpClient` 封装下游调用。
+- 业务 RPC：具名 protobuf 接口覆盖用户、视频、互动、管理、文件和转码；etcd 提供发现。
 - Repository 模式：服务入口已经按用户、视频、文件建立独立 Repository 边界。
 - 公共 data 层：将视频、用户、互动、审核、文件 DTO 从服务实现中拆出，降低服务间模型耦合。
-- svc_sync 边界：对齐参考项目的缓存删除/缓存回写结构，当前提供本地可运行实现，后续可接入 MQ/Redis 延迟同步。
+- 缓存事件：资料更新和 Outbox 同事务，RabbitMQ 驱动失效；Redis generation/Lua 防止并发旧读回填。
 - Redis 会话管理：登录成功生成 token，Redis 保存会话，gateway 校验登录状态。
 - Redis 用户资料缓存：`user_service` 使用 cache-aside；缓存未命中读取 MySQL，
   资料或头像更新后立即失效。基础 TTL 为 3600 秒，并增加 0 到 3600 秒随机
@@ -364,8 +363,10 @@ curl http://127.0.0.1:10000/videos
 
 ## 当前边界
 
-- 第一阶段仍是共享 MySQL schema，未强行引入分布式事务。
+- 新增字段需要应用 `migrations/016_add_video_cover_path.sql`。RPC 与远程文件配置、测试命令和仍未覆盖的边界见上述对照文档。
+
+- 当前仍共享 MySQL schema，未引入跨服务分布式事务。
 - `/videos/upload` 和 `/users/avatar` 为兼容现有 Qt 客户端仍保留旧路径；`file_service` 已承接 `/uploads/...` 下载和通用 `/files/upload`。
-- 未引入 etcd 注册中心、真实消息队列、服务网格或复杂熔断组件，避免超出当前项目维护能力；服务发现通过 `ServiceRegistry` 配置抽象实现，其他边界已通过 `svc_sync`、`svc_mq`、`svc_worker` 预留。
+- Reference runtime 已使用 etcd、RabbitMQ、Elasticsearch 和 FastDFS。共享目录的 Docker/portable 配置是兼容模式，不能作为 HLS 远程对象链路的验证证据。
 - 内部身份头依赖 Gateway 与下游的网络隔离；若下游未来跨不可信网络
   暴露，需要增加 mTLS 或内部请求签名。

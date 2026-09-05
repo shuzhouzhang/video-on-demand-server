@@ -7,6 +7,8 @@ option cc_generic_services = true;
 message RequestContext {
   string request_id = 1;
   string authenticated_account = 2;
+  // 仅注销操作传递待撤销的会话；不得记录到日志。
+  string session_token = 3;
 }
 
 message RpcStatus {

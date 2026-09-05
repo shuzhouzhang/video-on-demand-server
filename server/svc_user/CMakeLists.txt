@@ -39,6 +39,11 @@ target_link_libraries(user_service PRIVATE
 if(VOD_ENABLE_REFERENCE_RUNTIME)
     target_sources(user_service PRIVATE
         source/native_rpc.cc
+        ../common/outbox.cc
+        ../common/outbox_dispatcher.cc
+        ../common/rabbitmq_publisher.cc
+        ../common/rabbitmq_consumer.cc
+        ../common/remote_object_storage.cc
         ../common/etcd_registry.cc
         ../common/service_registry.cc
         ../common/brpc_http_bridge.cc

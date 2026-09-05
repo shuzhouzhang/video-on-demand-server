@@ -1,7 +1,6 @@
 #include "svc_server.h"
 #include "svc_data.h"
 #include "svc_rpc.h"
-#include "svc_sync.h"
 
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
@@ -10,7 +9,11 @@
 #include "../../common/redis_session_manager.h"
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
 #include "../../common/brpc_http_bridge.h"
+#include "../../common/remote_object_storage.h"
 #include "native_rpc.h"
+#include "video_operations.h"
+#include "interaction_operations.h"
+
 #include "../../common/etcd_registry.h"
 #endif
 #include "../../database/database.h"
@@ -23,7 +26,7 @@
 
 namespace svc_video {
 
-VideoServerBuilder& VideoServerBuilder::withConfigPath(std::string configPath) {
+VideoServerBuilder &VideoServerBuilder::withConfigPath(std::string configPath) {
     configPath_ = std::move(configPath);
     return *this;
 }
@@ -37,8 +40,6 @@ int VideoServerBuilder::start() const {
     }
 
     bitelog::bitelog_init(settings->log);
-
-
 
     bitedb::Database database;
     if (!database.connect(settings->database, error)) {
@@ -54,17 +55,15 @@ int VideoServerBuilder::start() const {
         return 1;
     }
 
-    CacheDelete cacheDelete;
-    CacheToDB cacheToDb(cacheDelete);
-    (void)cacheToDb;
-
     std::unique_ptr<bitesearch::IVideoSearchIndex> searchIndex;
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
     if (settings->elasticsearch.enabled) {
-        auto elasticsearch = std::make_unique<bitesearch::ElasticsearchVideoIndex>(
-            settings->elasticsearch);
+        auto elasticsearch =
+            std::make_unique<bitesearch::ElasticsearchVideoIndex>(
+                settings->elasticsearch);
         if (!elasticsearch->ensureIndex(error)) {
-            WRN("video_service Elasticsearch initialization deferred: {}", error);
+            WRN("video_service Elasticsearch initialization deferred: {}",
+                error);
         }
         searchIndex = std::move(elasticsearch);
     }
@@ -79,7 +78,24 @@ int VideoServerBuilder::start() const {
     auto repository = data.createRepository();
     biterepo::MySqlAdminRepository adminRepository(database);
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    bitestorage::RemoteObjectStorage mediaStorage(settings->registry,
+                                                  settings->rpc.fileTimeoutMs);
+    if (settings->registry.enabled && !mediaStorage.start(error)) {
+        ERR("file discovery failed: {}", error);
+        return 1;
+    }
     NativeVideoService nativeService(*repository);
+    VideoOperations videoOperations(biteserver::RouteContext{
+        {nullptr, repository.get(), repository.get(), &adminRepository},
+        nullptr,
+        settings->auth.enforceGatewayIdentity,
+        settings->registry.enabled ? &mediaStorage : nullptr});
+    InteractionOperations interactionOperations(biteserver::RouteContext{
+        {nullptr, repository.get(), repository.get(), &adminRepository},
+        nullptr,
+        settings->auth.enforceGatewayIdentity,
+        settings->registry.enabled ? &mediaStorage : nullptr});
+
 #endif
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
     std::unique_ptr<biterpc::BrpcHttpBridge> rpcBridge;
@@ -87,6 +103,14 @@ int VideoServerBuilder::start() const {
         rpcBridge = std::make_unique<biterpc::BrpcHttpBridge>(
             "http://127.0.0.1:" + std::to_string(settings->server.port),
             settings->rpc.timeoutMs);
+        if (!rpcBridge->addService(videoOperations, error)) {
+            ERR("business RPC registration failed: {}", error);
+            return 1;
+        }
+        if (!rpcBridge->addService(interactionOperations, error)) {
+            ERR("business RPC registration failed: {}", error);
+            return 1;
+        }
         if (!rpcBridge->addService(nativeService, error)) {
             ERR("native RPC registration failed: {}", error);
             return 1;
@@ -101,11 +125,10 @@ int VideoServerBuilder::start() const {
     if (settings->registry.enabled) {
         bitesvc::ServiceEndpoint endpoint{
             "video_service",
-            "http://127.0.0.1:" + std::to_string(
-                settings->rpc.enabled ? settings->rpc.port
-                                      : settings->server.port),
-            "",
-            settings->rpc.enabled ? "brpc" : "http"};
+            "http://127.0.0.1:" + std::to_string(settings->rpc.enabled
+                                                     ? settings->rpc.port
+                                                     : settings->server.port),
+            "", settings->rpc.enabled ? "brpc" : "http"};
         serviceProvider = std::make_unique<bitesvc::EtcdServiceProvider>(
             settings->registry, "video_service", std::move(endpoint));
         if (!serviceProvider->start(error)) {
@@ -115,10 +138,10 @@ int VideoServerBuilder::start() const {
     }
 #endif
     VideoRpcService rpc(*repository, *repository, adminRepository,
-                   sessionManager.enabled() ? &sessionManager : nullptr,
-                   settings->auth.enforceGatewayIdentity);
+                        sessionManager.enabled() ? &sessionManager : nullptr,
+                        settings->auth.enforceGatewayIdentity);
     return rpc.listen(settings->rpc.enabled ? "127.0.0.1" : "0.0.0.0",
                       settings->server.port);
 }
 
-}  // namespace svc_video
+} // namespace svc_video

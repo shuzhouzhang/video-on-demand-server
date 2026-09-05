@@ -1,5 +1,6 @@
 set(VOD_PROTO_FILES
     base.proto
+    business.proto
     file.proto
     http.proto
     message.proto

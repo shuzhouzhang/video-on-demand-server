@@ -8,11 +8,13 @@
 #include "../../common/util.h"
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
 #include "../../common/brpc_http_bridge.h"
+#include "../../common/remote_object_storage.h"
 #include "../../common/etcd_registry.h"
 #include "../../common/outbox.h"
 #include "../../common/rabbitmq_consumer.h"
 #include "../../common/rabbitmq_publisher.h"
 #include "message.pb.h"
+#include "native_rpc.h"
 #endif
 #include "../../database/database.h"
 
@@ -27,9 +29,8 @@
 
 namespace {
 
-void setJsonResponse(httplib::Response& response,
-                     int status,
-                     const Json::Value& body) {
+void setJsonResponse(httplib::Response &response, int status,
+                     const Json::Value &body) {
     response.status = status;
     response.set_content(
         biteutil::JSON::serialize(body).value_or(
@@ -37,15 +38,15 @@ void setJsonResponse(httplib::Response& response,
         "application/json; charset=utf-8");
 }
 
-void setError(httplib::Response& response, int status,
-              const std::string& message) {
+void setError(httplib::Response &response, int status,
+              const std::string &message) {
     Json::Value body;
     body["success"] = false;
     body["message"] = message;
     setJsonResponse(response, status, body);
 }
 
-void writeJob(Json::Value& data, const svc_transcode::TranscodeJob& job) {
+void writeJob(Json::Value &data, const svc_transcode::TranscodeJob &job) {
     data["jobId"] = job.jobId;
     data["videoId"] = job.videoId;
     data["status"] = job.status;
@@ -54,11 +55,10 @@ void writeJob(Json::Value& data, const svc_transcode::TranscodeJob& job) {
     data["error"] = job.errorMessage;
 }
 
-std::optional<std::string> authenticatedAccount(
-    const httplib::Request& request,
-    const std::string& claimed,
-    bool strict,
-    httplib::Response& response) {
+std::optional<std::string> authenticatedAccount(const httplib::Request &request,
+                                                const std::string &claimed,
+                                                bool strict,
+                                                httplib::Response &response) {
     const auto identity =
         biteauth::bindAuthenticatedAccount(request, claimed, strict);
     if (identity.status == biteauth::IdentityStatus::Unauthenticated) {
@@ -76,29 +76,29 @@ std::optional<std::string> authenticatedAccount(
     return identity.account;
 }
 
-void registerRoutes(httplib::Server& server,
-                    svc_transcode::ITranscodeRepository& repository,
+void registerRoutes(httplib::Server &server,
+                    svc_transcode::ITranscodeRepository &repository,
                     bool strictIdentity) {
-    server.Get("/health", [](const httplib::Request&,
-                             httplib::Response& response) {
-        Json::Value body;
-        body["code"] = 0;
-        body["message"] = "ok";
-        body["data"]["status"] = "UP";
-        setJsonResponse(response, 200, body);
-    });
-    server.Get("/healthz", [](const httplib::Request&,
-                              httplib::Response& response) {
-        Json::Value body;
-        body["success"] = true;
-        body["service"] = "transcode_service";
-        body["status"] = "ok";
-        setJsonResponse(response, 200, body);
-    });
+    server.Get("/health",
+               [](const httplib::Request &, httplib::Response &response) {
+                   Json::Value body;
+                   body["code"] = 0;
+                   body["message"] = "ok";
+                   body["data"]["status"] = "UP";
+                   setJsonResponse(response, 200, body);
+               });
+    server.Get("/healthz",
+               [](const httplib::Request &, httplib::Response &response) {
+                   Json::Value body;
+                   body["success"] = true;
+                   body["service"] = "transcode_service";
+                   body["status"] = "ok";
+                   setJsonResponse(response, 200, body);
+               });
 
     server.Post("/transcode/jobs", [&repository, strictIdentity](
-                                      const httplib::Request& request,
-                                      httplib::Response& response) {
+                                       const httplib::Request &request,
+                                       httplib::Response &response) {
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
             setError(response, 400, "request body must be a JSON object");
@@ -109,20 +109,22 @@ void registerRoutes(httplib::Server& server,
             setError(response, 400, "videoId is required");
             return;
         }
-        const auto account = authenticatedAccount(
-            request, (*payload)["account"].asString(), strictIdentity,
-            response);
-        if (!account) return;
+        const auto account =
+            authenticatedAccount(request, (*payload)["account"].asString(),
+                                 strictIdentity, response);
+        if (!account)
+            return;
 
         svc_transcode::TranscodeJob job;
         std::string error;
-        const std::string requestId = request.has_header("X-Request-Id")
-            ? request.get_header_value("X-Request-Id") : "";
-        if (!repository.enqueueForVideo(videoId, *account, requestId,
-                                        job, error)) {
-            setError(response, error.find("not found") != std::string::npos
-                                   ? 404
-                                   : 500,
+        const std::string requestId =
+            request.has_header("X-Request-Id")
+                ? request.get_header_value("X-Request-Id")
+                : "";
+        if (!repository.enqueueForVideo(videoId, *account, requestId, job,
+                                        error)) {
+            setError(response,
+                     error.find("not found") != std::string::npos ? 404 : 500,
                      error);
             return;
         }
@@ -135,19 +137,22 @@ void registerRoutes(httplib::Server& server,
     });
 
     server.Get("/transcode/jobs", [&repository, strictIdentity](
-                                     const httplib::Request& request,
-                                     httplib::Response& response) {
+                                      const httplib::Request &request,
+                                      httplib::Response &response) {
         const std::string videoId = request.has_param("videoId")
-            ? request.get_param_value("videoId") : "";
+                                        ? request.get_param_value("videoId")
+                                        : "";
         const std::string claimed = request.has_param("account")
-            ? request.get_param_value("account") : "";
+                                        ? request.get_param_value("account")
+                                        : "";
         if (videoId.empty()) {
             setError(response, 400, "videoId is required");
             return;
         }
-        const auto account = authenticatedAccount(
-            request, claimed, strictIdentity, response);
-        if (!account) return;
+        const auto account =
+            authenticatedAccount(request, claimed, strictIdentity, response);
+        if (!account)
+            return;
         std::optional<svc_transcode::TranscodeJob> job;
         std::string error;
         if (!repository.findByVideoId(videoId, *account, job, error)) {
@@ -166,8 +171,8 @@ void registerRoutes(httplib::Server& server,
     });
 
     server.Post("/transcode/jobs/retry", [&repository, strictIdentity](
-                                            const httplib::Request& request,
-                                            httplib::Response& response) {
+                                             const httplib::Request &request,
+                                             httplib::Response &response) {
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
             setError(response, 400, "request body must be a JSON object");
@@ -178,10 +183,11 @@ void registerRoutes(httplib::Server& server,
             setError(response, 400, "videoId is required");
             return;
         }
-        const auto account = authenticatedAccount(
-            request, (*payload)["account"].asString(), strictIdentity,
-            response);
-        if (!account) return;
+        const auto account =
+            authenticatedAccount(request, (*payload)["account"].asString(),
+                                 strictIdentity, response);
+        if (!account)
+            return;
         bool updated = false;
         std::string error;
         if (!repository.retry(videoId, *account, updated, error)) {
@@ -189,7 +195,8 @@ void registerRoutes(httplib::Server& server,
             return;
         }
         if (!updated) {
-            setError(response, 409, "only completed or failed jobs can be retried");
+            setError(response, 409,
+                     "only completed or failed jobs can be retried");
             return;
         }
         Json::Value body;
@@ -201,12 +208,12 @@ void registerRoutes(httplib::Server& server,
     });
 }
 
-}  // namespace
+} // namespace
 
 namespace svc_transcode {
 
-TranscodeServerBuilder& TranscodeServerBuilder::withConfigPath(
-    std::string configPath) {
+TranscodeServerBuilder &
+TranscodeServerBuilder::withConfigPath(std::string configPath) {
     configPath_ = std::move(configPath);
     return *this;
 }
@@ -220,42 +227,12 @@ int TranscodeServerBuilder::start() const {
     }
     bitelog::bitelog_init(settings->log);
 
-#ifdef VOD_ENABLE_REFERENCE_RUNTIME
-    std::unique_ptr<biterpc::BrpcHttpBridge> rpcBridge;
-    if (settings->rpc.enabled) {
-        rpcBridge = std::make_unique<biterpc::BrpcHttpBridge>(
-            "http://127.0.0.1:" + std::to_string(settings->server.port),
-            settings->rpc.timeoutMs);
-        if (!rpcBridge->start(settings->rpc.bindHost, settings->rpc.port,
-                              error)) {
-            ERR("transcode_service brpc startup failed: {}", error);
-            return 1;
-        }
-    }
-    std::unique_ptr<bitesvc::EtcdServiceProvider> serviceProvider;
-    if (settings->registry.enabled) {
-        bitesvc::ServiceEndpoint endpoint{
-            "transcode_service",
-            "http://127.0.0.1:" + std::to_string(
-                settings->rpc.enabled ? settings->rpc.port
-                                      : settings->server.port),
-            "",
-            settings->rpc.enabled ? "brpc" : "http"};
-        serviceProvider = std::make_unique<bitesvc::EtcdServiceProvider>(
-            settings->registry, "transcode_service", std::move(endpoint));
-        if (!serviceProvider->start(error)) {
-            ERR("transcode_service etcd registration failed: {}", error);
-            return 1;
-        }
-    }
-#endif
-
     bitedb::Database database;
     if (!database.connect(settings->database, error)) {
         ERR("transcode_service database connection failed: {}", error);
         return 1;
     }
-    biteevent::MySqlOutboxRepository* outbox = nullptr;
+    biteevent::MySqlOutboxRepository *outbox = nullptr;
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
     std::unique_ptr<biteevent::MySqlOutboxRepository> outboxRepository;
     std::unique_ptr<biteevent::RabbitMqPublisher> eventPublisher;
@@ -268,7 +245,7 @@ int TranscodeServerBuilder::start() const {
         eventPublisher =
             std::make_unique<biteevent::RabbitMqPublisher>(settings->rabbitmq);
         outboxDispatcher = std::make_unique<biteevent::OutboxDispatcher>(
-            *outboxRepository, *eventPublisher, 3, 5, 10);
+            *outboxRepository, *eventPublisher, 100, 5, 10);
         outboxWorker =
             std::make_unique<biteevent::OutboxWorker>(*outboxDispatcher, 500);
         outboxWorker->start();
@@ -277,11 +254,57 @@ int TranscodeServerBuilder::start() const {
     MySqlTranscodeRepository repository(
         database, static_cast<unsigned int>(settings->transcode.maxAttempts),
         outbox);
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    TranscodeOperations nativeService(repository,
+                                      settings->auth.enforceGatewayIdentity);
+    std::unique_ptr<biterpc::BrpcHttpBridge> rpcBridge;
+    if (settings->rpc.enabled) {
+        rpcBridge = std::make_unique<biterpc::BrpcHttpBridge>(
+            "http://127.0.0.1:" + std::to_string(settings->server.port),
+            settings->rpc.timeoutMs);
+        if (!rpcBridge->addService(nativeService, error)) {
+            ERR("transcode RPC registration failed: {}", error);
+            return 1;
+        }
+        if (!rpcBridge->start(settings->rpc.bindHost, settings->rpc.port,
+                              error)) {
+            ERR("transcode_service brpc startup failed: {}", error);
+            return 1;
+        }
+    }
+    std::unique_ptr<bitesvc::EtcdServiceProvider> serviceProvider;
+    if (settings->registry.enabled) {
+        bitesvc::ServiceEndpoint endpoint{
+            "transcode_service",
+            "http://127.0.0.1:" + std::to_string(settings->rpc.enabled
+                                                     ? settings->rpc.port
+                                                     : settings->server.port),
+            "", settings->rpc.enabled ? "brpc" : "http"};
+        serviceProvider = std::make_unique<bitesvc::EtcdServiceProvider>(
+            settings->registry, "transcode_service", std::move(endpoint));
+        if (!serviceProvider->start(error)) {
+            ERR("transcode_service etcd registration failed: {}", error);
+            return 1;
+        }
+    }
+#endif
     if (!repository.recoverExpired(error)) {
         ERR("transcode_service lease recovery failed: {}", error);
         return 1;
     }
-    FfmpegRunner runner(settings->transcode);
+    bitestorage::IObjectStorage *remoteMedia = nullptr;
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    bitestorage::RemoteObjectStorage mediaStorage(settings->registry,
+                                                  settings->rpc.fileTimeoutMs);
+    if (settings->registry.enabled) {
+        if (!mediaStorage.start(error)) {
+            ERR("file discovery failed: {}", error);
+            return 1;
+        }
+        remoteMedia = &mediaStorage;
+    }
+#endif
+    FfmpegRunner runner(settings->transcode, remoteMedia);
     SvcWorker worker(repository, runner, settings->transcode);
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
     std::unique_ptr<biteevent::ConsumedEventStore> consumedEvents;
@@ -293,8 +316,8 @@ int TranscodeServerBuilder::start() const {
             settings->rabbitmq, "vod.transcode", "transcode.hls",
             "vod.transcode.hls",
             [&worker, store = consumedEvents.get()](
-                const biteevent::ConsumedMessage& message,
-                std::string& handlerError) {
+                const biteevent::ConsumedMessage &message,
+                std::string &handlerError) {
                 vod::api::EventEnvelope envelope;
                 if (!envelope.ParseFromString(message.body) ||
                     envelope.kind() != vod::api::HLS_TRANSCODE_REQUESTED ||
@@ -304,19 +327,22 @@ int TranscodeServerBuilder::start() const {
                 }
                 if (!message.eventId.empty() &&
                     message.eventId != envelope.event_id()) {
-                    handlerError = "RabbitMQ message id does not match event envelope";
+                    handlerError =
+                        "RabbitMQ message id does not match event envelope";
                     return false;
                 }
                 bool alreadyProcessed = false;
                 if (!store->wasProcessed("transcode_service",
-                                         envelope.event_id(),
-                                         alreadyProcessed, handlerError)) {
+                                         envelope.event_id(), alreadyProcessed,
+                                         handlerError)) {
                     return false;
                 }
-                if (alreadyProcessed) return true;
+                if (alreadyProcessed)
+                    return true;
 
-                bool processed = false;
-                if (!worker.processOne(processed, handlerError)) return false;
+                // MQ 事件是唤醒通知；任务完成状态只由数据库租约决定。
+                // 消息重复或丢失均不会跳过任务，后台扫描负责延迟重试与租约恢复。
+                worker.wake();
 
                 bool first = false;
                 if (!store->markIfFirst("transcode_service",
@@ -327,17 +353,18 @@ int TranscodeServerBuilder::start() const {
                 return true;
             });
         transcodeConsumer->start();
+        worker.start();
     } else if (settings->transcode.enabled) {
         worker.start();
     }
 #else
-    if (settings->transcode.enabled) worker.start();
+    if (settings->transcode.enabled)
+        worker.start();
 #endif
 
     httplib::Server server;
-    registerRoutes(server, repository,
-                   settings->auth.enforceGatewayIdentity);
-    const char* httpHost = settings->rpc.enabled ? "127.0.0.1" : "0.0.0.0";
+    registerRoutes(server, repository, settings->auth.enforceGatewayIdentity);
+    const char *httpHost = settings->rpc.enabled ? "127.0.0.1" : "0.0.0.0";
     INF("transcode_service listening on {}:{}", httpHost,
         settings->server.port);
     if (!server.listen(httpHost, settings->server.port)) {
@@ -348,4 +375,4 @@ int TranscodeServerBuilder::start() const {
     return 0;
 }
 
-}  // namespace svc_transcode
+} // namespace svc_transcode

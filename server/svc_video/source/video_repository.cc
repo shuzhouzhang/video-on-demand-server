@@ -25,23 +25,24 @@ const std::string PUBLIC_VIDEO_PREDICATE =
     "status = 1 AND review_status = '审核通过' "
     "AND transcode_status = 'READY'";
 
-bool isLocalUploadPath(const std::string& path) {
-    if (path.empty()) return false;
+bool isLocalUploadPath(const std::string &path) {
+    if (path.empty())
+        return false;
     const std::filesystem::path normalized =
         std::filesystem::path(path).lexically_normal();
-    if (normalized.is_absolute()) return false;
+    if (normalized.is_absolute())
+        return false;
     const auto first = normalized.begin();
     return first != normalized.end() && *first == "uploads" &&
-        normalized.string().find("..") == std::string::npos;
+           normalized.string().find("..") == std::string::npos;
 }
 
-std::string valueOrEmpty(const std::optional<std::string>& value) {
+std::string valueOrEmpty(const std::optional<std::string> &value) {
     return value.value_or("");
 }
 
-bool videoFromRow(const bitedb::Database::QueryRow& row,
-                  Video& video,
-                  std::string& error) {
+bool videoFromRow(const bitedb::Database::QueryRow &row, Video &video,
+                  std::string &error) {
     if (row.size() != VIDEO_FIELD_COUNT) {
         error = "视频查询返回了不符合预期的字段数量";
         return false;
@@ -54,7 +55,7 @@ bool videoFromRow(const bitedb::Database::QueryRow& row,
     try {
         video.durationSeconds =
             static_cast<std::size_t>(std::stoull(valueOrEmpty(row[4])));
-    } catch (const std::exception&) {
+    } catch (const std::exception &) {
         error = "视频时长不是有效数字: " + video.id;
         return false;
     }
@@ -68,7 +69,7 @@ bool videoFromRow(const bitedb::Database::QueryRow& row,
         error = "视频标签不是有效JSON数组: " + video.id;
         return false;
     }
-    for (const Json::Value& tag : *tags) {
+    for (const Json::Value &tag : *tags) {
         if (tag.isString()) {
             video.tags.push_back(tag.asString());
         }
@@ -76,15 +77,14 @@ bool videoFromRow(const bitedb::Database::QueryRow& row,
     return true;
 }
 
-bool publicVideoExists(bitedb::Database& database,
-                       const std::string& escapedVideoId,
-                       bool& exists,
-                       std::string& error) {
+bool publicVideoExists(bitedb::Database &database,
+                       const std::string &escapedVideoId, bool &exists,
+                       std::string &error) {
     exists = false;
     std::vector<bitedb::Database::QueryRow> rows;
     const std::string sql = "SELECT 1 FROM videos WHERE " +
-        PUBLIC_VIDEO_PREDICATE + " AND video_id = '" + escapedVideoId +
-        "' LIMIT 1";
+                            PUBLIC_VIDEO_PREDICATE + " AND video_id = '" +
+                            escapedVideoId + "' LIMIT 1";
     if (!database.query(sql, rows, error)) {
         return false;
     }
@@ -92,9 +92,8 @@ bool publicVideoExists(bitedb::Database& database,
     return true;
 }
 
-bool commentFromRow(const bitedb::Database::QueryRow& row,
-                    VideoComment& comment,
-                    std::string& error) {
+bool commentFromRow(const bitedb::Database::QueryRow &row,
+                    VideoComment &comment, std::string &error) {
     if (row.size() != 6) {
         error = "评论查询返回了不符合预期的字段数量";
         return false;
@@ -108,16 +107,15 @@ bool commentFromRow(const bitedb::Database::QueryRow& row,
     return true;
 }
 
-bool barrageFromRow(const bitedb::Database::QueryRow& row,
-                    VideoBarrage& barrage,
-                    std::string& error) {
+bool barrageFromRow(const bitedb::Database::QueryRow &row,
+                    VideoBarrage &barrage, std::string &error) {
     if (row.size() != 2) {
         error = "弹幕查询返回了不符合预期的字段数量";
         return false;
     }
     try {
         barrage.seconds = std::stoi(valueOrEmpty(row[0]));
-    } catch (const std::exception&) {
+    } catch (const std::exception &) {
         error = "弹幕时间不是有效数字";
         return false;
     }
@@ -125,9 +123,8 @@ bool barrageFromRow(const bitedb::Database::QueryRow& row,
     return true;
 }
 
-bool profileFromRow(const bitedb::Database::QueryRow& row,
-                    UserProfile& profile,
-                    std::string& error) {
+bool profileFromRow(const bitedb::Database::QueryRow &row, UserProfile &profile,
+                    std::string &error) {
     if (row.size() != 4) {
         error = "用户资料查询返回了不符合预期的字段数量";
         return false;
@@ -139,25 +136,24 @@ bool profileFromRow(const bitedb::Database::QueryRow& row,
     return true;
 }
 
-}  // namespace
+} // namespace
 
 MySqlVideoRepository::MySqlVideoRepository(
-    bitedb::Database& database,
-    bitesearch::IVideoSearchIndex* searchIndex,
-    biteevent::MySqlOutboxRepository* outbox)
+    bitedb::Database &database, bitesearch::IVideoSearchIndex *searchIndex,
+    biteevent::MySqlOutboxRepository *outbox)
     : database_(database), searchIndex_(searchIndex), outbox_(outbox) {}
 
-bool MySqlVideoRepository::list(std::vector<Video>& videos,
-                                std::string& error) {
+bool MySqlVideoRepository::list(std::vector<Video> &videos,
+                                std::string &error) {
     videos.clear();
     std::vector<bitedb::Database::QueryRow> rows;
-    const std::string sql = VIDEO_SELECT + "WHERE " +
-        PUBLIC_VIDEO_PREDICATE + " ORDER BY published_on DESC, id DESC";
+    const std::string sql = VIDEO_SELECT + "WHERE " + PUBLIC_VIDEO_PREDICATE +
+                            " ORDER BY published_on DESC, id DESC";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
 
-    for (const auto& row : rows) {
+    for (const auto &row : rows) {
         Video video;
         if (!videoFromRow(row, video, error)) {
             videos.clear();
@@ -168,20 +164,22 @@ bool MySqlVideoRepository::list(std::vector<Video>& videos,
     return true;
 }
 
-bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
-                                       std::optional<Video>& video,
-                                       std::string& error) {
+bool MySqlVideoRepository::createVideo(const VideoDraft &draft,
+                                       std::optional<Video> &video,
+                                       std::string &error) {
     video.reset();
     std::string randomToken;
-    if (!bitesession::generateSessionToken(randomToken, error)) return false;
+    if (!bitesession::generateSessionToken(randomToken, error))
+        return false;
     // 128 random bits keeps the existing VARCHAR(64) business key compact
     // while removing the MAX(id)+1 race between concurrent uploads.
     const std::string videoId = "video-" + randomToken.substr(4, 32);
     const std::string sourcePath =
         draft.playUrl.empty() ? draft.videoFileName : draft.playUrl;
-    const bool needsTranscode = isLocalUploadPath(sourcePath);
+    const bool needsTranscode =
+        isLocalUploadPath(sourcePath) || sourcePath.rfind("object:", 0) == 0;
     Json::Value tagArray(Json::arrayValue);
-    for (const auto& tag : draft.tags) {
+    for (const auto &tag : draft.tags) {
         tagArray.append(tag);
     }
     const auto tagsJson = biteutil::JSON::serialize(tagArray);
@@ -213,33 +211,40 @@ bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
         return false;
     }
 
+    std::string escapedCoverPath;
+    if (!database_.escape(draft.coverPath, escapedCoverPath, error))
+        return false;
     const std::string sql =
         "INSERT INTO videos (video_id, title, user_name, owner_account, "
         "published_on, duration_seconds, play_count, like_count, category, "
         "tags, description, play_url, video_file_name, cover_file_name, "
-        "status, review_status, transcode_status) VALUES ('" +
-        escapedVideoId + "', '" +
-        escapedTitle + "', '" + escapedUserName + "', '" + escapedAccount +
-        "', CURDATE(), 0, 0, 0, '" + escapedCategory + "', '" +
-        escapedTags + "', '" + escapedDescription + "', '" +
+        "status, review_status, cover_path, transcode_status) VALUES ('" +
+        escapedVideoId + "', '" + escapedTitle + "', '" + escapedUserName +
+        "', '" + escapedAccount + "', CURDATE(), 0, 0, 0, '" + escapedCategory +
+        "', '" + escapedTags + "', '" + escapedDescription + "', '" +
         escapedPlayUrl + "', '" + escapedVideoFileName + "', '" +
-        escapedCoverFileName + "', 1, '待审核', '" +
+        escapedCoverFileName + "', 1, '待审核', '" + escapedCoverPath + "', '" +
         (needsTranscode ? "PENDING" : "READY") + "')";
     if (needsTranscode) {
         std::string escapedOutput;
         const std::string outputPath =
-            "uploads/transcoded/" + videoId + ".mp4";
-        if (!database_.escape(outputPath, escapedOutput, error)) return false;
+            "uploads/transcoded/" + videoId +
+            (sourcePath.rfind("object:", 0) == 0 ? "/index.m3u8" : ".mp4");
+        if (!database_.escape(outputPath, escapedOutput, error))
+            return false;
         const std::string jobSql =
             "INSERT INTO transcode_jobs (job_id, video_id, owner_account, "
             "input_path, output_path, status, attempts, max_attempts, "
-            "next_attempt_at) VALUES ('transcode-" + escapedVideoId +
-            "', '" + escapedVideoId + "', '" + escapedAccount + "', '" +
-            escapedPlayUrl + "', '" + escapedOutput +
+            "next_attempt_at) VALUES ('transcode-" +
+            escapedVideoId + "', '" + escapedVideoId + "', '" + escapedAccount +
+            "', '" + escapedPlayUrl + "', '" + escapedOutput +
             "', 'PENDING', 0, 3, NOW())";
         std::vector<std::string> transaction{sql, jobSql};
 #ifndef VOD_ENABLE_REFERENCE_RUNTIME
-        if (outbox_) { error = "outbox requires reference runtime"; return false; }
+        if (outbox_) {
+            error = "outbox requires reference runtime";
+            return false;
+        }
 #else
         if (outbox_) {
             vod::api::HlsTranscodeMessage message;
@@ -269,11 +274,13 @@ bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
                 return false;
             }
             std::string outboxSql;
-            if (!outbox_->buildInsertSql(event, outboxSql, error)) return false;
+            if (!outbox_->buildInsertSql(event, outboxSql, error))
+                return false;
             transaction.push_back(std::move(outboxSql));
         }
 #endif
-        if (!database_.executeTransaction(transaction, error)) return false;
+        if (!database_.executeTransaction(transaction, error))
+            return false;
     } else if (!database_.execute(sql, error)) {
         return false;
     }
@@ -281,9 +288,9 @@ bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
     return findAnyById(videoId, video, error);
 }
 
-bool MySqlVideoRepository::findById(const std::string& videoId,
-                                    std::optional<Video>& video,
-                                    std::string& error) {
+bool MySqlVideoRepository::findById(const std::string &videoId,
+                                    std::optional<Video> &video,
+                                    std::string &error) {
     video.reset();
     std::string escapedVideoId;
     if (!database_.escape(videoId, escapedVideoId, error)) {
@@ -291,9 +298,8 @@ bool MySqlVideoRepository::findById(const std::string& videoId,
     }
 
     std::vector<bitedb::Database::QueryRow> rows;
-    const std::string sql = VIDEO_SELECT + "WHERE " +
-        PUBLIC_VIDEO_PREDICATE + " AND video_id = '" + escapedVideoId +
-        "' LIMIT 1";
+    const std::string sql = VIDEO_SELECT + "WHERE " + PUBLIC_VIDEO_PREDICATE +
+                            " AND video_id = '" + escapedVideoId + "' LIMIT 1";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
@@ -309,17 +315,17 @@ bool MySqlVideoRepository::findById(const std::string& videoId,
     return true;
 }
 
-bool MySqlVideoRepository::findAnyById(const std::string& videoId,
-                                       std::optional<Video>& video,
-                                       std::string& error) {
+bool MySqlVideoRepository::findAnyById(const std::string &videoId,
+                                       std::optional<Video> &video,
+                                       std::string &error) {
     video.reset();
     std::string escapedVideoId;
     if (!database_.escape(videoId, escapedVideoId, error)) {
         return false;
     }
     std::vector<bitedb::Database::QueryRow> rows;
-    const std::string sql = VIDEO_SELECT + "WHERE video_id = '" +
-        escapedVideoId + "' LIMIT 1";
+    const std::string sql =
+        VIDEO_SELECT + "WHERE video_id = '" + escapedVideoId + "' LIMIT 1";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
@@ -334,9 +340,9 @@ bool MySqlVideoRepository::findAnyById(const std::string& videoId,
     return true;
 }
 
-bool MySqlVideoRepository::search(const std::string& keyword,
-                                  std::vector<Video>& videos,
-                                  std::string& error) {
+bool MySqlVideoRepository::search(const std::string &keyword,
+                                  std::vector<Video> &videos,
+                                  std::string &error) {
     videos.clear();
     if (searchIndex_) {
         std::vector<std::string> ids;
@@ -344,10 +350,12 @@ bool MySqlVideoRepository::search(const std::string& keyword,
             error = "elasticsearch unavailable: " + error;
             return false;
         }
-        for (const auto& id : ids) {
+        for (const auto &id : ids) {
             std::optional<Video> video;
-            if (!findById(id, video, error)) return false;
-            if (video) videos.push_back(std::move(*video));
+            if (!findById(id, video, error))
+                return false;
+            if (video)
+                videos.push_back(std::move(*video));
         }
         return true;
     }
@@ -358,18 +366,17 @@ bool MySqlVideoRepository::search(const std::string& keyword,
 
     std::vector<bitedb::Database::QueryRow> rows;
     const std::string pattern = "'%" + escapedKeyword + "%'";
-    const std::string sql = VIDEO_SELECT + "WHERE " +
-        PUBLIC_VIDEO_PREDICATE + " AND (title LIKE " + pattern +
-        " OR user_name LIKE " + pattern +
-        " OR category LIKE " + pattern +
-        " OR CAST(tags AS CHAR) LIKE " + pattern +
+    const std::string sql =
+        VIDEO_SELECT + "WHERE " + PUBLIC_VIDEO_PREDICATE + " AND (title LIKE " +
+        pattern + " OR user_name LIKE " + pattern + " OR category LIKE " +
+        pattern + " OR CAST(tags AS CHAR) LIKE " + pattern +
         " OR description LIKE " + pattern +
         ") ORDER BY published_on DESC, id DESC";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
 
-    for (const auto& row : rows) {
+    for (const auto &row : rows) {
         Video video;
         if (!videoFromRow(row, video, error)) {
             videos.clear();
@@ -380,9 +387,9 @@ bool MySqlVideoRepository::search(const std::string& keyword,
     return true;
 }
 
-bool MySqlVideoRepository::playUrl(const std::string& videoId,
-                                   std::optional<std::string>& url,
-                                   std::string& error) {
+bool MySqlVideoRepository::playUrl(const std::string &videoId,
+                                   std::optional<std::string> &url,
+                                   std::string &error) {
     url.reset();
     std::string escapedVideoId;
     if (!database_.escape(videoId, escapedVideoId, error)) {
@@ -390,9 +397,9 @@ bool MySqlVideoRepository::playUrl(const std::string& videoId,
     }
 
     std::vector<bitedb::Database::QueryRow> rows;
-    const std::string sql =
-        "SELECT play_url FROM videos WHERE " + PUBLIC_VIDEO_PREDICATE +
-        " AND video_id = '" + escapedVideoId + "' LIMIT 1";
+    const std::string sql = "SELECT play_url FROM videos WHERE " +
+                            PUBLIC_VIDEO_PREDICATE + " AND video_id = '" +
+                            escapedVideoId + "' LIMIT 1";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
@@ -408,11 +415,10 @@ bool MySqlVideoRepository::playUrl(const std::string& videoId,
     return true;
 }
 
-bool MySqlVideoRepository::likeStatus(
-    const std::string& videoId,
-    const std::string& account,
-    std::optional<LikeStatus>& status,
-    std::string& error) {
+bool MySqlVideoRepository::likeStatus(const std::string &videoId,
+                                      const std::string &account,
+                                      std::optional<LikeStatus> &status,
+                                      std::string &error) {
     status.reset();
     std::vector<bitedb::Database::QueryRow> rows;
     const std::string sql =
@@ -437,12 +443,10 @@ bool MySqlVideoRepository::likeStatus(
     return true;
 }
 
-bool MySqlVideoRepository::setLiked(
-    const std::string& videoId,
-    const std::string& account,
-    bool shouldLike,
-    std::optional<LikeStatus>& status,
-    std::string& error) {
+bool MySqlVideoRepository::setLiked(const std::string &videoId,
+                                    const std::string &account, bool shouldLike,
+                                    std::optional<LikeStatus> &status,
+                                    std::string &error) {
     if (!likeStatus(videoId, account, status, error)) {
         return false;
     }
@@ -450,36 +454,36 @@ bool MySqlVideoRepository::setLiked(
         return true;
     }
 
-    const std::string changeSql = shouldLike
-        ? "INSERT IGNORE INTO video_likes (video_id, account) VALUES (?, ?)"
-        : "DELETE FROM video_likes WHERE video_id = ? AND account = ?";
-    const std::string followupSql = shouldLike
-        ? "UPDATE videos SET like_count = like_count + 1 WHERE video_id = ?"
-        : "UPDATE videos SET like_count = GREATEST(like_count - 1, 0) "
-          "WHERE video_id = ?";
+    const std::string changeSql =
+        shouldLike
+            ? "INSERT IGNORE INTO video_likes (video_id, account) VALUES (?, ?)"
+            : "DELETE FROM video_likes WHERE video_id = ? AND account = ?";
+    const std::string followupSql =
+        shouldLike
+            ? "UPDATE videos SET like_count = like_count + 1 WHERE video_id = ?"
+            : "UPDATE videos SET like_count = GREATEST(like_count - 1, 0) "
+              "WHERE video_id = ?";
     bool changed = false;
-    if (!database_.executeIfChangedPrepared(
-            changeSql, {videoId, account}, followupSql, {videoId}, changed,
-            error)) {
+    if (!database_.executeIfChangedPrepared(changeSql, {videoId, account},
+                                            followupSql, {videoId}, changed,
+                                            error)) {
         return false;
     }
     return likeStatus(videoId, account, status, error);
 }
 
-bool MySqlVideoRepository::watchProgress(
-    const std::string& videoId,
-    const std::string& account,
-    std::optional<WatchProgress>& progress,
-    std::string& error) {
+bool MySqlVideoRepository::watchProgress(const std::string &videoId,
+                                         const std::string &account,
+                                         std::optional<WatchProgress> &progress,
+                                         std::string &error) {
     progress.reset();
     std::vector<bitedb::Database::QueryRow> rows;
-    const std::string sql =
-        "SELECT COALESCE(wp.seconds, 0) FROM videos v "
-        "LEFT JOIN video_watch_progress wp "
-        "ON wp.video_id = v.video_id AND wp.account = ? "
-        "WHERE v.video_id = ? AND v.status = 1 "
-        "AND v.review_status = '审核通过' "
-        "AND v.transcode_status = 'READY' LIMIT 1";
+    const std::string sql = "SELECT COALESCE(wp.seconds, 0) FROM videos v "
+                            "LEFT JOIN video_watch_progress wp "
+                            "ON wp.video_id = v.video_id AND wp.account = ? "
+                            "WHERE v.video_id = ? AND v.status = 1 "
+                            "AND v.review_status = '审核通过' "
+                            "AND v.transcode_status = 'READY' LIMIT 1";
     if (!database_.queryPrepared(sql, {account, videoId}, rows, error)) {
         return false;
     }
@@ -493,7 +497,7 @@ bool MySqlVideoRepository::watchProgress(
 
     try {
         progress = WatchProgress{std::stoi(valueOrEmpty(rows.front()[0]))};
-    } catch (const std::exception&) {
+    } catch (const std::exception &) {
         error = "播放进度不是有效数字";
         return false;
     }
@@ -501,11 +505,8 @@ bool MySqlVideoRepository::watchProgress(
 }
 
 bool MySqlVideoRepository::saveWatchProgress(
-    const std::string& videoId,
-    const std::string& account,
-    int seconds,
-    std::optional<WatchProgress>& progress,
-    std::string& error) {
+    const std::string &videoId, const std::string &account, int seconds,
+    std::optional<WatchProgress> &progress, std::string &error) {
     if (!watchProgress(videoId, account, progress, error)) {
         return false;
     }
@@ -523,11 +524,10 @@ bool MySqlVideoRepository::saveWatchProgress(
     return watchProgress(videoId, account, progress, error);
 }
 
-bool MySqlVideoRepository::favoriteStatus(
-    const std::string& videoId,
-    const std::string& account,
-    std::optional<FavoriteStatus>& status,
-    std::string& error) {
+bool MySqlVideoRepository::favoriteStatus(const std::string &videoId,
+                                          const std::string &account,
+                                          std::optional<FavoriteStatus> &status,
+                                          std::string &error) {
     status.reset();
     std::vector<bitedb::Database::QueryRow> rows;
     const std::string sql =
@@ -551,12 +551,11 @@ bool MySqlVideoRepository::favoriteStatus(
     return true;
 }
 
-bool MySqlVideoRepository::setFavorited(
-    const std::string& videoId,
-    const std::string& account,
-    bool shouldFavorite,
-    std::optional<FavoriteStatus>& status,
-    std::string& error) {
+bool MySqlVideoRepository::setFavorited(const std::string &videoId,
+                                        const std::string &account,
+                                        bool shouldFavorite,
+                                        std::optional<FavoriteStatus> &status,
+                                        std::string &error) {
     if (!favoriteStatus(videoId, account, status, error)) {
         return false;
     }
@@ -564,18 +563,20 @@ bool MySqlVideoRepository::setFavorited(
         return true;
     }
 
-    const std::string sql = shouldFavorite
-        ? "INSERT IGNORE INTO video_favorites (video_id, account) VALUES (?, ?)"
-        : "DELETE FROM video_favorites WHERE video_id = ? AND account = ?";
+    const std::string sql =
+        shouldFavorite
+            ? "INSERT IGNORE INTO video_favorites (video_id, account) VALUES "
+              "(?, ?)"
+            : "DELETE FROM video_favorites WHERE video_id = ? AND account = ?";
     if (!database_.executePrepared(sql, {videoId, account}, error)) {
         return false;
     }
     return favoriteStatus(videoId, account, status, error);
 }
 
-bool MySqlVideoRepository::favoriteVideos(const std::string& account,
-                                          std::vector<Video>& videos,
-                                          std::string& error) {
+bool MySqlVideoRepository::favoriteVideos(const std::string &account,
+                                          std::vector<Video> &videos,
+                                          std::string &error) {
     videos.clear();
     std::string escapedAccount;
     if (!database_.escape(account, escapedAccount, error)) {
@@ -592,13 +593,13 @@ bool MySqlVideoRepository::favoriteVideos(const std::string& account,
         "INNER JOIN video_favorites vf ON vf.video_id = videos.video_id "
         "WHERE videos.status = 1 AND videos.review_status = '审核通过' "
         "AND videos.transcode_status = 'READY' "
-        "AND vf.account = '" + escapedAccount +
-        "' ORDER BY vf.created_at DESC, vf.id DESC";
+        "AND vf.account = '" +
+        escapedAccount + "' ORDER BY vf.created_at DESC, vf.id DESC";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
 
-    for (const auto& row : rows) {
+    for (const auto &row : rows) {
         Video video;
         if (!videoFromRow(row, video, error)) {
             videos.clear();
@@ -609,9 +610,9 @@ bool MySqlVideoRepository::favoriteVideos(const std::string& account,
     return true;
 }
 
-bool MySqlVideoRepository::ownerVideos(const std::string& account,
-                                       std::vector<Video>& videos,
-                                       std::string& error) {
+bool MySqlVideoRepository::ownerVideos(const std::string &account,
+                                       std::vector<Video> &videos,
+                                       std::string &error) {
     videos.clear();
     std::string escapedAccount;
     if (!database_.escape(account, escapedAccount, error)) {
@@ -619,14 +620,14 @@ bool MySqlVideoRepository::ownerVideos(const std::string& account,
     }
 
     std::vector<bitedb::Database::QueryRow> rows;
-    const std::string sql = VIDEO_SELECT +
-        "WHERE status = 1 AND owner_account = '" + escapedAccount +
-        "' ORDER BY published_on DESC, id DESC";
+    const std::string sql =
+        VIDEO_SELECT + "WHERE status = 1 AND owner_account = '" +
+        escapedAccount + "' ORDER BY published_on DESC, id DESC";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
 
-    for (const auto& row : rows) {
+    for (const auto &row : rows) {
         Video video;
         if (!videoFromRow(row, video, error)) {
             videos.clear();
@@ -638,9 +639,8 @@ bool MySqlVideoRepository::ownerVideos(const std::string& account,
 }
 
 bool MySqlVideoRepository::comments(
-    const std::string& videoId,
-    std::optional<std::vector<VideoComment>>& comments,
-    std::string& error) {
+    const std::string &videoId,
+    std::optional<std::vector<VideoComment>> &comments, std::string &error) {
     comments.reset();
     std::string escapedVideoId;
     if (!database_.escape(videoId, escapedVideoId, error)) {
@@ -659,14 +659,14 @@ bool MySqlVideoRepository::comments(
     const std::string sql =
         "SELECT LPAD(id, 3, '0'), video_id, user_name, account, content, "
         "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i') FROM video_comments "
-        "WHERE video_id = '" + escapedVideoId +
-        "' ORDER BY created_at DESC, id DESC";
+        "WHERE video_id = '" +
+        escapedVideoId + "' ORDER BY created_at DESC, id DESC";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
 
     std::vector<VideoComment> result;
-    for (const auto& row : rows) {
+    for (const auto &row : rows) {
         VideoComment comment;
         if (!commentFromRow(row, comment, error)) {
             return false;
@@ -677,13 +677,12 @@ bool MySqlVideoRepository::comments(
     return true;
 }
 
-bool MySqlVideoRepository::addComment(
-    const std::string& videoId,
-    const std::string& userName,
-    const std::string& account,
-    const std::string& content,
-    std::optional<VideoComment>& comment,
-    std::string& error) {
+bool MySqlVideoRepository::addComment(const std::string &videoId,
+                                      const std::string &userName,
+                                      const std::string &account,
+                                      const std::string &content,
+                                      std::optional<VideoComment> &comment,
+                                      std::string &error) {
     comment.reset();
     std::string escapedVideoId;
     std::string escapedUserName;
@@ -706,8 +705,9 @@ bool MySqlVideoRepository::addComment(
 
     const std::string insertSql =
         "INSERT INTO video_comments (video_id, user_name, account, content) "
-        "VALUES ('" + escapedVideoId + "', '" + escapedUserName + "', '" +
-        escapedAccount + "', '" + escapedContent + "')";
+        "VALUES ('" +
+        escapedVideoId + "', '" + escapedUserName + "', '" + escapedAccount +
+        "', '" + escapedContent + "')";
     if (!database_.execute(insertSql, error)) {
         return false;
     }
@@ -734,9 +734,8 @@ bool MySqlVideoRepository::addComment(
 }
 
 bool MySqlVideoRepository::barrages(
-    const std::string& videoId,
-    std::optional<std::vector<VideoBarrage>>& barrages,
-    std::string& error) {
+    const std::string &videoId,
+    std::optional<std::vector<VideoBarrage>> &barrages, std::string &error) {
     barrages.reset();
     std::string escapedVideoId;
     if (!database_.escape(videoId, escapedVideoId, error)) {
@@ -760,7 +759,7 @@ bool MySqlVideoRepository::barrages(
     }
 
     std::vector<VideoBarrage> result;
-    for (const auto& row : rows) {
+    for (const auto &row : rows) {
         VideoBarrage barrage;
         if (!barrageFromRow(row, barrage, error)) {
             return false;
@@ -771,12 +770,10 @@ bool MySqlVideoRepository::barrages(
     return true;
 }
 
-bool MySqlVideoRepository::addBarrage(
-    const std::string& videoId,
-    int seconds,
-    const std::string& text,
-    std::optional<VideoBarrage>& barrage,
-    std::string& error) {
+bool MySqlVideoRepository::addBarrage(const std::string &videoId, int seconds,
+                                      const std::string &text,
+                                      std::optional<VideoBarrage> &barrage,
+                                      std::string &error) {
     barrage.reset();
     std::string escapedVideoId;
     std::string escapedText;
@@ -795,8 +792,8 @@ bool MySqlVideoRepository::addBarrage(
 
     const std::string insertSql =
         "INSERT INTO video_barrages (video_id, seconds, text) VALUES ('" +
-        escapedVideoId + "', " + std::to_string(seconds) + ", '" +
-        escapedText + "')";
+        escapedVideoId + "', " + std::to_string(seconds) + ", '" + escapedText +
+        "')";
     if (!database_.execute(insertSql, error)) {
         return false;
     }
@@ -805,9 +802,8 @@ bool MySqlVideoRepository::addBarrage(
 }
 
 bool MySqlVideoRepository::interactionUserProfile(
-    const std::string& account,
-    std::optional<UserProfile>& profile,
-    std::string& error) {
+    const std::string &account, std::optional<UserProfile> &profile,
+    std::string &error) {
     profile.reset();
     std::string escapedAccount;
     if (!database_.escape(account, escapedAccount, error)) {
@@ -817,7 +813,8 @@ bool MySqlVideoRepository::interactionUserProfile(
     std::vector<bitedb::Database::QueryRow> rows;
     const std::string sql =
         "SELECT account, user_name, description, avatar_path FROM users "
-        "WHERE account = '" + escapedAccount + "' LIMIT 1";
+        "WHERE account = '" +
+        escapedAccount + "' LIMIT 1";
     if (!database_.query(sql, rows, error)) {
         return false;
     }
@@ -833,4 +830,4 @@ bool MySqlVideoRepository::interactionUserProfile(
     return true;
 }
 
-}  // namespace bitevideo
+} // namespace bitevideo

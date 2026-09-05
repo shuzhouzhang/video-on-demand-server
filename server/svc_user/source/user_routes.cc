@@ -9,10 +9,12 @@
 #include <cstdlib>
 namespace biteserver {
 using namespace detail;
-void registerUserRoutes(httplib::Server& server, RouteContext context) {
-    if (!context.repositories.users) return;
-    server.Post("/login", [context](const httplib::Request& request,
-                                  httplib::Response& response) {
+UserHandlers makeUserHandlers(RouteContext context) {
+    UserHandlers handlers;
+    if (!context.repositories.users)
+        return handlers;
+    handlers.Login = [context](const httplib::Request &request,
+                               httplib::Response &response) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -26,7 +28,8 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
         const std::string password = (*payload)["password"].asString();
         std::optional<bitevideo::UserProfile> profile;
         std::string error;
-        if (!context.repositories.users->passwordLogin(account, password, profile, error)) {
+        if (!context.repositories.users->passwordLogin(account, password,
+                                                       profile, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /login failed: {}", error);
             }
@@ -39,8 +42,8 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             setJsonResponse(response, 200, body);
         } else {
             std::string token;
-            if (context.sessions &&
-                !context.sessions->createToken(profile->account, token, error)) {
+            if (context.sessions && !context.sessions->createToken(
+                                        profile->account, token, error)) {
                 if (bitelog::g_logger) {
                     ERR("POST /login redis session failed: {}", error);
                 }
@@ -57,9 +60,9 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             }
             setJsonResponse(response, 200, body);
         }
-    });
-    server.Post("/login/password", [context](const httplib::Request& request,
-                                           httplib::Response& response) {
+    };
+    handlers.PasswordLogin = [context](const httplib::Request &request,
+                                       httplib::Response &response) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -73,7 +76,8 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
         const std::string password = (*payload)["password"].asString();
         std::optional<bitevideo::UserProfile> profile;
         std::string error;
-        if (!context.repositories.users->passwordLogin(account, password, profile, error)) {
+        if (!context.repositories.users->passwordLogin(account, password,
+                                                       profile, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /login/password failed: {}", error);
             }
@@ -86,8 +90,8 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             setJsonResponse(response, 200, body);
         } else {
             std::string token;
-            if (context.sessions &&
-                !context.sessions->createToken(profile->account, token, error)) {
+            if (context.sessions && !context.sessions->createToken(
+                                        profile->account, token, error)) {
                 if (bitelog::g_logger) {
                     ERR("POST /login/password redis session failed: {}", error);
                 }
@@ -104,11 +108,10 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             }
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    server.Post("/login/email-code",
-                 [context](const httplib::Request& request,
-                        httplib::Response& response) {
+    handlers.SendEmailCode = [context](const httplib::Request &request,
+                                       httplib::Response &response) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -121,7 +124,8 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
         bitevideo::EmailCodeSession session;
         std::string error;
         const std::string email = trimCopy((*payload)["email"].asString());
-        if (!context.repositories.users->createEmailCode(email, session, error)) {
+        if (!context.repositories.users->createEmailCode(email, session,
+                                                         error)) {
             if (bitelog::g_logger) {
                 ERR("POST /login/email-code failed: {}", error);
             }
@@ -142,10 +146,10 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             }
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    server.Post("/login/email", [context](const httplib::Request& request,
-                                        httplib::Response& response) {
+    handlers.EmailLogin = [context](const httplib::Request &request,
+                                    httplib::Response &response) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -162,8 +166,8 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             trimCopy((*payload)["authcode"].asString());
         std::optional<bitevideo::UserProfile> profile;
         std::string error;
-        if (!context.repositories.users->emailLogin(
-                email, authcodeId, authcode, profile, error)) {
+        if (!context.repositories.users->emailLogin(email, authcodeId, authcode,
+                                                    profile, error)) {
             if (bitelog::g_logger) {
                 ERR("POST /login/email failed: {}", error);
             }
@@ -176,8 +180,8 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             setJsonResponse(response, 200, body);
         } else {
             std::string token;
-            if (context.sessions &&
-                !context.sessions->createToken(profile->account, token, error)) {
+            if (context.sessions && !context.sessions->createToken(
+                                        profile->account, token, error)) {
                 if (bitelog::g_logger) {
                     ERR("POST /login/email redis session failed: {}", error);
                 }
@@ -194,10 +198,10 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             }
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    server.Post("/logout", [context](const httplib::Request& request,
-                                   httplib::Response& response) {
+    handlers.Logout = [context](const httplib::Request &request,
+                                httplib::Response &response) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -210,9 +214,9 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
         bool knownUser = false;
         std::string error;
         std::string account;
-        if (!bindProtectedAccount(
-                request, (*payload)["account"].asString(),
-                context.enforceGatewayIdentity, response, account)) {
+        if (!bindProtectedAccount(request, (*payload)["account"].asString(),
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         if (account.empty()) {
@@ -251,15 +255,17 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             body["message"] = "已退出登录";
             setJsonResponse(response, 200, body);
         }
-    });
-    server.Get("/users/profile", [context](const httplib::Request& request,
-                                         httplib::Response& response) {
+    };
+    handlers.GetProfile = [context](const httplib::Request &request,
+                                    httplib::Response &response) {
         Json::Value body;
-        const std::string claimedAccount = request.has_param("account")
-            ? request.get_param_value("account") : "";
+        const std::string claimedAccount =
+            request.has_param("account") ? request.get_param_value("account")
+                                         : "";
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         if (account.empty()) {
@@ -287,10 +293,10 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             body["user"] = userProfileToJson(*profile);
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    server.Post("/users/profile", [context](const httplib::Request& request,
-                                          httplib::Response& response) {
+    handlers.UpdateProfile = [context](const httplib::Request &request,
+                                       httplib::Response &response) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -303,7 +309,8 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
         const std::string claimedAccount = (*payload)["account"].asString();
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         const std::string userName = (*payload)["userName"].asString();
@@ -347,10 +354,10 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             body["user"] = userProfileToJson(*profile);
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    server.Post("/users/avatar", [context](const httplib::Request& request,
-                                         httplib::Response& response) {
+    handlers.UploadAvatar = [context](const httplib::Request &request,
+                                      httplib::Response &response) {
         Json::Value body;
         constexpr std::size_t MAX_AVATAR_BYTES = 5 * 1024 * 1024;
         if (!request.is_multipart_form_data()) {
@@ -368,11 +375,14 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
         }
 
         const auto avatarPart = request.get_file_value("avatarFile");
-        const std::string claimedAccount = request.has_file("account")
-            ? request.get_file_value("account").content : "";
+        const std::string claimedAccount =
+            request.has_file("account")
+                ? request.get_file_value("account").content
+                : "";
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         const std::string avatarName = pathFileName(avatarPart.filename);
@@ -409,6 +419,34 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             return;
         }
 
+        if (context.mediaStorage) {
+            bitestorage::StoredObject stored;
+            if (!context.mediaStorage->put("avatars", avatarName,
+                                           avatarPart.content, stored, error)) {
+                body["success"] = false;
+                body["message"] = "头像文件服务暂时不可用";
+                setJsonResponse(response, 503, body);
+                return;
+            }
+            const auto publicPath = "/uploads/" + stored.locator;
+            bool updated = false;
+            if (!context.repositories.users->updateAvatarPath(
+                    account, publicPath, updated, error) ||
+                !updated) {
+                std::string ignored;
+                context.mediaStorage->remove(stored.locator, ignored);
+                body["success"] = false;
+                body["message"] = "头像保存失败";
+                setJsonResponse(response, 500, body);
+                return;
+            }
+            body["success"] = true;
+            body["message"] = "头像上传成功";
+            body["avatarPath"] = publicPath;
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
         std::string avatarToken;
         if (!bitesession::generateSessionToken(avatarToken, error)) {
             if (bitelog::g_logger) {
@@ -421,8 +459,8 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
         }
         const std::filesystem::path avatarPath =
             std::filesystem::path("uploads") / "avatars" /
-            (safeAccountName(account) + "-" + avatarToken.substr(4, 32) +
-             "-" + avatarName);
+            (safeAccountName(account) + "-" + avatarToken.substr(4, 32) + "-" +
+             avatarName);
         if (!writeBinaryFile(avatarPath, avatarPart.content, error)) {
             if (bitelog::g_logger) {
                 ERR("avatar file write failed: {}", error);
@@ -456,72 +494,99 @@ void registerUserRoutes(httplib::Server& server, RouteContext context) {
             body["avatarPath"] = avatarPath.generic_string();
             setJsonResponse(response, 200, body);
         }
-    });
+    };
     if (context.repositories.admins) {
-    server.Get("/admin/users", [context](const httplib::Request& request,
-                                      httplib::Response& response) {
-        if (!requireAdministrator(request, context.enforceGatewayIdentity,
-                                  context.repositories.admins, response)) {
-            return;
-        }
-        Json::Value body;
-        std::vector<bitevideo::AdminUser> users;
-        std::string error;
-        if (!context.repositories.admins->adminUsers(users, error)) {
-            if (bitelog::g_logger) {
-                ERR("GET /admin/users failed: {}", error);
+        handlers.ListUsers = [context](const httplib::Request &request,
+                                       httplib::Response &response) {
+            if (!requireAdministrator(request, context.enforceGatewayIdentity,
+                                      context.repositories.admins, response)) {
+                return;
             }
-            body["success"] = false;
-            body["message"] = "用户列表暂时不可用";
-            setJsonResponse(response, 500, body);
-            return;
-        }
-
-        body["success"] = true;
-        body["users"] = Json::arrayValue;
-        for (const auto& user : users) {
-            body["users"].append(adminUserToJson(user));
-        }
-        setJsonResponse(response, 200, body);
-    });
-
-    server.Post("/admin/users/action",
-                 [context](const httplib::Request& request,
-                        httplib::Response& response) {
-        if (!requireAdministrator(request, context.enforceGatewayIdentity,
-                                  context.repositories.admins, response)) {
-            return;
-        }
-        Json::Value body;
-        const auto payload = biteutil::JSON::unserialize(request.body);
-        if (!payload || !payload->isObject()) {
-            body["success"] = false;
-            body["message"] = "请求JSON格式错误";
-            setJsonResponse(response, 200, body);
-            return;
-        }
-
-        bool updated = false;
-        std::string error;
-        const std::string account = trimCopy((*payload)["account"].asString());
-        const std::string action = trimCopy((*payload)["action"].asString());
-        if (!context.repositories.admins->updateAdminUser(account, action, updated, error)) {
-            if (bitelog::g_logger) {
-                ERR("POST /admin/users/action failed: {}", error);
+            Json::Value body;
+            std::vector<bitevideo::AdminUser> users;
+            std::string error;
+            if (!context.repositories.admins->adminUsers(users, error)) {
+                if (bitelog::g_logger) {
+                    ERR("GET /admin/users failed: {}", error);
+                }
+                body["success"] = false;
+                body["message"] = "用户列表暂时不可用";
+                setJsonResponse(response, 500, body);
+                return;
             }
-            body["success"] = false;
-            body["message"] = "角色操作失败";
-            setJsonResponse(response, 500, body);
-        } else if (!updated) {
-            body["success"] = false;
-            body["message"] = error.empty() ? "角色操作不支持" : error;
-            setJsonResponse(response, 200, body);
-        } else {
+
             body["success"] = true;
-            body["message"] = "角色操作成功";
+            body["users"] = Json::arrayValue;
+            for (const auto &user : users) {
+                body["users"].append(adminUserToJson(user));
+            }
             setJsonResponse(response, 200, body);
-        }
-    });
+        };
+
+        handlers.UpdateUser = [context](const httplib::Request &request,
+                                        httplib::Response &response) {
+            if (!requireAdministrator(request, context.enforceGatewayIdentity,
+                                      context.repositories.admins, response)) {
+                return;
+            }
+            Json::Value body;
+            const auto payload = biteutil::JSON::unserialize(request.body);
+            if (!payload || !payload->isObject()) {
+                body["success"] = false;
+                body["message"] = "请求JSON格式错误";
+                setJsonResponse(response, 200, body);
+                return;
+            }
+
+            bool updated = false;
+            std::string error;
+            const std::string account =
+                trimCopy((*payload)["account"].asString());
+            const std::string action =
+                trimCopy((*payload)["action"].asString());
+            if (!context.repositories.admins->updateAdminUser(account, action,
+                                                              updated, error)) {
+                if (bitelog::g_logger) {
+                    ERR("POST /admin/users/action failed: {}", error);
+                }
+                body["success"] = false;
+                body["message"] = "角色操作失败";
+                setJsonResponse(response, 500, body);
+            } else if (!updated) {
+                body["success"] = false;
+                body["message"] = error.empty() ? "角色操作不支持" : error;
+                setJsonResponse(response, 200, body);
+            } else {
+                body["success"] = true;
+                body["message"] = "角色操作成功";
+                setJsonResponse(response, 200, body);
+            }
+        };
     }
+    return handlers;
 }
-}  // namespace biteserver
+
+void registerUserRoutes(httplib::Server &server, RouteContext context) {
+    auto handlers = makeUserHandlers(context);
+    if (handlers.Login)
+        server.Post("/login", std::move(handlers.Login));
+    if (handlers.PasswordLogin)
+        server.Post("/login/password", std::move(handlers.PasswordLogin));
+    if (handlers.SendEmailCode)
+        server.Post("/login/email-code", std::move(handlers.SendEmailCode));
+    if (handlers.EmailLogin)
+        server.Post("/login/email", std::move(handlers.EmailLogin));
+    if (handlers.Logout)
+        server.Post("/logout", std::move(handlers.Logout));
+    if (handlers.GetProfile)
+        server.Get("/users/profile", std::move(handlers.GetProfile));
+    if (handlers.UpdateProfile)
+        server.Post("/users/profile", std::move(handlers.UpdateProfile));
+    if (handlers.UploadAvatar)
+        server.Post("/users/avatar", std::move(handlers.UploadAvatar));
+    if (handlers.ListUsers)
+        server.Get("/admin/users", std::move(handlers.ListUsers));
+    if (handlers.UpdateUser)
+        server.Post("/admin/users/action", std::move(handlers.UpdateUser));
+}
+} // namespace biteserver

@@ -31,3 +31,8 @@
 /test/http/uploads/
 /file_service
 /transcode_service
+
+/test/integration/profile_cache_test
+
+__pycache__/
+*.pyc

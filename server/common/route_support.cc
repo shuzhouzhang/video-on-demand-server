@@ -19,9 +19,8 @@
 namespace biteserver::detail {
 std::string trimCopy(std::string value);
 
-void setJsonResponse(httplib::Response& response,
-                     int status,
-                     const Json::Value& body) {
+void setJsonResponse(httplib::Response &response, int status,
+                     const Json::Value &body) {
     response.status = status;
     response.set_content(
         biteutil::JSON::serialize(body).value_or(
@@ -29,11 +28,10 @@ void setJsonResponse(httplib::Response& response,
         "application/json; charset=utf-8");
 }
 
-bool bindProtectedAccount(const httplib::Request& request,
-                          const std::string& claimedAccount,
+bool bindProtectedAccount(const httplib::Request &request,
+                          const std::string &claimedAccount,
                           bool enforceGatewayIdentity,
-                          httplib::Response& response,
-                          std::string& account) {
+                          httplib::Response &response, std::string &account) {
     const auto identity = biteauth::bindAuthenticatedAccount(
         request, trimCopy(claimedAccount), enforceGatewayIdentity);
     if (identity.status == biteauth::IdentityStatus::Allowed) {
@@ -52,10 +50,10 @@ bool bindProtectedAccount(const httplib::Request& request,
     return false;
 }
 
-bool requireAdministrator(const httplib::Request& request,
+bool requireAdministrator(const httplib::Request &request,
                           bool enforceGatewayIdentity,
-                          biterepo::IAdminRepository* adminRepository,
-                          httplib::Response& response) {
+                          biterepo::IAdminRepository *adminRepository,
+                          httplib::Response &response) {
     if (!enforceGatewayIdentity) {
         return true;
     }
@@ -93,11 +91,11 @@ bool requireAdministrator(const httplib::Request& request,
     return true;
 }
 
-bool useAuthenticatedUserName(const biterepo::RepositorySet& repositories,
-                              const std::string& account,
+bool useAuthenticatedUserName(const biterepo::RepositorySet &repositories,
+                              const std::string &account,
                               bool enforceGatewayIdentity,
-                              httplib::Response& response,
-                              std::string& userName) {
+                              httplib::Response &response,
+                              std::string &userName) {
     if (!enforceGatewayIdentity) {
         return true;
     }
@@ -128,7 +126,7 @@ bool useAuthenticatedUserName(const biterepo::RepositorySet& repositories,
     return true;
 }
 
-std::size_t utf8CharCount(const std::string& value) {
+std::size_t utf8CharCount(const std::string &value) {
     std::size_t count = 0;
     for (unsigned char ch : value) {
         if ((ch & 0xC0) != 0x80) {
@@ -138,7 +136,7 @@ std::size_t utf8CharCount(const std::string& value) {
     return count;
 }
 
-std::string utf8Prefix(const std::string& value, std::size_t maxChars) {
+std::string utf8Prefix(const std::string &value, std::size_t maxChars) {
     std::size_t chars = 0;
     std::size_t bytes = 0;
     while (bytes < value.size() && chars < maxChars) {
@@ -162,7 +160,7 @@ std::string utf8Prefix(const std::string& value, std::size_t maxChars) {
     return value.substr(0, bytes);
 }
 
-Json::Value commentToJson(const bitevideo::VideoComment& comment) {
+Json::Value commentToJson(const bitevideo::VideoComment &comment) {
     Json::Value value;
     value["id"] = comment.id;
     value["videoId"] = comment.videoId;
@@ -173,14 +171,14 @@ Json::Value commentToJson(const bitevideo::VideoComment& comment) {
     return value;
 }
 
-Json::Value barrageToJson(const bitevideo::VideoBarrage& barrage) {
+Json::Value barrageToJson(const bitevideo::VideoBarrage &barrage) {
     Json::Value value;
     value["seconds"] = barrage.seconds;
     value["text"] = barrage.text;
     return value;
 }
 
-Json::Value userProfileToJson(const bitevideo::UserProfile& profile) {
+Json::Value userProfileToJson(const bitevideo::UserProfile &profile) {
     Json::Value value;
     value["account"] = profile.account;
     value["userName"] = profile.userName;
@@ -189,7 +187,7 @@ Json::Value userProfileToJson(const bitevideo::UserProfile& profile) {
     return value;
 }
 
-Json::Value adminReviewToJson(const bitevideo::AdminReview& review) {
+Json::Value adminReviewToJson(const bitevideo::AdminReview &review) {
     Json::Value value;
     value["videoId"] = review.videoId;
     value["title"] = review.title;
@@ -199,7 +197,7 @@ Json::Value adminReviewToJson(const bitevideo::AdminReview& review) {
     return value;
 }
 
-Json::Value adminUserToJson(const bitevideo::AdminUser& user) {
+Json::Value adminUserToJson(const bitevideo::AdminUser &user) {
     Json::Value value;
     value["account"] = user.account;
     value["userName"] = user.userName;
@@ -210,9 +208,7 @@ Json::Value adminUserToJson(const bitevideo::AdminUser& user) {
 }
 
 std::string trimCopy(std::string value) {
-    const auto notSpace = [](unsigned char ch) {
-        return !std::isspace(ch);
-    };
+    const auto notSpace = [](unsigned char ch) { return !std::isspace(ch); };
     value.erase(value.begin(),
                 std::find_if(value.begin(), value.end(), notSpace));
     value.erase(std::find_if(value.rbegin(), value.rend(), notSpace).base(),
@@ -220,22 +216,21 @@ std::string trimCopy(std::string value) {
     return value;
 }
 
-std::string pathFileName(const std::string& filename) {
+std::string pathFileName(const std::string &filename) {
     return std::filesystem::path(filename).filename().string();
 }
 
 std::string lowerAscii(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char ch) {
-                       return static_cast<char>(std::tolower(ch));
-                   });
+    std::transform(
+        value.begin(), value.end(), value.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     return value;
 }
 
 std::string safeAccountName(std::string account) {
-    for (char& ch : account) {
+    for (char &ch : account) {
         const bool safe = std::isalnum(static_cast<unsigned char>(ch)) ||
-            ch == '-' || ch == '_';
+                          ch == '-' || ch == '_';
         if (!safe) {
             ch = '_';
         }
@@ -243,20 +238,22 @@ std::string safeAccountName(std::string account) {
     return account.empty() ? "unknown" : account;
 }
 
-bool hasAllowedAvatarSuffix(const std::string& filename) {
+bool hasAllowedAvatarSuffix(const std::string &filename) {
     const std::string suffix =
         lowerAscii(std::filesystem::path(filename).extension().string());
     return suffix == ".png" || suffix == ".jpg" || suffix == ".jpeg";
 }
 
-bool hasAllowedVideoSuffix(const std::string& filename) {
+bool hasAllowedVideoSuffix(const std::string &filename) {
     const std::string suffix =
         lowerAscii(std::filesystem::path(filename).extension().string());
     return suffix == ".mp4" || suffix == ".mov" || suffix == ".mkv" ||
-        suffix == ".avi" || suffix == ".webm";
+           suffix == ".avi" || suffix == ".webm";
 }
 
-std::string publicUploadUrl(const std::string& storedPath) {
+std::string publicUploadUrl(const std::string &storedPath) {
+    if (storedPath.rfind("object:", 0) == 0)
+        return "/uploads/" + storedPath.substr(7);
     std::string normalized = storedPath;
     std::replace(normalized.begin(), normalized.end(), '\\', '/');
     if (normalized.rfind("uploads/", 0) == 0) {
@@ -265,9 +262,8 @@ std::string publicUploadUrl(const std::string& storedPath) {
     return normalized;
 }
 
-bool writeBinaryFile(const std::filesystem::path& path,
-                     const std::string& content,
-                     std::string& error) {
+bool writeBinaryFile(const std::filesystem::path &path,
+                     const std::string &content, std::string &error) {
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     if (ec) {
@@ -276,7 +272,7 @@ bool writeBinaryFile(const std::filesystem::path& path,
     }
     // "xb" atomically creates a new file and refuses an existing path, so a
     // collision can never silently truncate an earlier upload.
-    std::FILE* out = std::fopen(path.string().c_str(), "wbx");
+    std::FILE *out = std::fopen(path.string().c_str(), "wbx");
     if (!out) {
         error = "打开文件失败: " + std::string(std::strerror(errno));
         return false;
@@ -294,11 +290,11 @@ bool writeBinaryFile(const std::filesystem::path& path,
 }
 
 bool smokeCleanupEnabled() {
-    const char* value = std::getenv("VIDEO_ENABLE_SMOKE_CLEANUP");
+    const char *value = std::getenv("VIDEO_ENABLE_SMOKE_CLEANUP");
     return value != nullptr && std::string(value) == "1";
 }
 
-bool safeRemoveUploadPath(const std::string& storedPath, std::string& error) {
+bool safeRemoveUploadPath(const std::string &storedPath, std::string &error) {
     if (storedPath.empty()) {
         return true;
     }
@@ -318,7 +314,7 @@ bool safeRemoveUploadPath(const std::string& storedPath, std::string& error) {
         error = "不能清理绝对路径";
         return false;
     }
-    for (const auto& part : relative) {
+    for (const auto &part : relative) {
         if (part == "..") {
             error = "不能清理上级目录路径";
             return false;
@@ -334,8 +330,7 @@ bool safeRemoveUploadPath(const std::string& storedPath, std::string& error) {
     return true;
 }
 
-bool draftFromJson(const Json::Value& payload,
-                   bitevideo::VideoDraft& draft) {
+bool draftFromJson(const Json::Value &payload, bitevideo::VideoDraft &draft) {
     if (!payload.isObject()) {
         return false;
     }
@@ -350,7 +345,7 @@ bool draftFromJson(const Json::Value& payload,
         draft.userName = draft.account;
     }
     if (payload["tags"].isArray()) {
-        for (const Json::Value& tag : payload["tags"]) {
+        for (const Json::Value &tag : payload["tags"]) {
             if (tag.isString() && !tag.asString().empty()) {
                 draft.tags.push_back(tag.asString());
             }
@@ -359,4 +354,4 @@ bool draftFromJson(const Json::Value& payload,
     return true;
 }
 
-}  // namespace biteserver::detail
+} // namespace biteserver::detail

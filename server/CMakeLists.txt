@@ -65,6 +65,8 @@ if(BUILD_TESTING AND VOD_ENABLE_REFERENCE_RUNTIME)
     add_executable(native_rpc_test
         ../test/native_rpc/native_rpc_test.cc
         svc_user/source/native_rpc.cc svc_video/source/native_rpc.cc
+        svc_user/source/user_routes.cc svc_video/source/video_routes.cc
+        svc_video/source/interaction_routes.cc common/email_verification.cc
         common/route_support.cc common/auth.cc common/util.cc common/bitelog.cc
         common/redis_session_manager.cc common/session_token.cc data/video.cc)
     target_link_libraries(native_rpc_test PRIVATE vod_proto vod_reference_dependencies

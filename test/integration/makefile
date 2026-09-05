@@ -38,4 +38,11 @@ redis-tsan:
 
 clean:
 	rm -f redis_session_manager_test backend_integration_test \
-		redis_session_manager_tsan
+		redis_session_manager_tsan profile_cache_test
+
+profile_cache_test: profile_cache_test.cc $(COMMON_SOURCES) ../../server/svc_user/source/cached_user_repository.cc ../../server/data/video.cc
+	g++ -std=c++17 -Wall -Wextra -pedantic $^ -o $@ $(LIBS)
+
+.PHONY: profile-cache
+profile-cache: profile_cache_test
+	./profile_cache_test

@@ -13,8 +13,9 @@ struct VideoDraft {
     std::vector<std::string> tags;
     std::string description;
     std::string playUrl;
+    std::string coverPath;
     std::string videoFileName;
     std::string coverFileName;
 };
 
-}  // namespace bitevideo
+} // namespace bitevideo

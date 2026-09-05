@@ -13,13 +13,12 @@
 namespace svc_transcode {
 namespace {
 
-std::string valueOrEmpty(const std::optional<std::string>& value) {
+std::string valueOrEmpty(const std::optional<std::string> &value) {
     return value.value_or("");
 }
 
-bool parseJob(const bitedb::Database::QueryRow& row,
-              TranscodeJob& job,
-              std::string& error) {
+bool parseJob(const bitedb::Database::QueryRow &row, TranscodeJob &job,
+              std::string &error) {
     if (row.size() != 10) {
         error = "transcode job query returned unexpected fields";
         return false;
@@ -33,54 +32,53 @@ bool parseJob(const bitedb::Database::QueryRow& row,
     job.errorMessage = valueOrEmpty(row[8]);
     job.leaseToken = valueOrEmpty(row[9]);
     try {
-        job.attempts = static_cast<unsigned int>(
-            std::stoul(valueOrEmpty(row[6])));
-        job.maxAttempts = static_cast<unsigned int>(
-            std::stoul(valueOrEmpty(row[7])));
-    } catch (const std::exception&) {
+        job.attempts =
+            static_cast<unsigned int>(std::stoul(valueOrEmpty(row[6])));
+        job.maxAttempts =
+            static_cast<unsigned int>(std::stoul(valueOrEmpty(row[7])));
+    } catch (const std::exception &) {
         error = "transcode job attempt count is invalid";
         return false;
     }
     return true;
 }
 
-constexpr const char* JOB_SELECT =
+constexpr const char *JOB_SELECT =
     "SELECT job_id, video_id, owner_account, input_path, output_path, "
     "status, CAST(attempts AS CHAR), CAST(max_attempts AS CHAR), "
     "error_message, lease_token FROM transcode_jobs WHERE ";
 
-}  // namespace
+} // namespace
 
 MySqlTranscodeRepository::MySqlTranscodeRepository(
-    bitedb::Database& database, unsigned int defaultMaxAttempts,
-    biteevent::MySqlOutboxRepository* outbox)
+    bitedb::Database &database, unsigned int defaultMaxAttempts,
+    biteevent::MySqlOutboxRepository *outbox)
     : database_(database),
-      defaultMaxAttempts_(std::max(1U, defaultMaxAttempts)),
-      outbox_(outbox) {}
+      defaultMaxAttempts_(std::max(1U, defaultMaxAttempts)), outbox_(outbox) {}
 
-bool MySqlTranscodeRepository::readJob(
-    const std::string& whereClause,
-    std::optional<TranscodeJob>& job,
-    std::string& error) {
+bool MySqlTranscodeRepository::readJob(const std::string &whereClause,
+                                       std::optional<TranscodeJob> &job,
+                                       std::string &error) {
     job.reset();
     std::vector<bitedb::Database::QueryRow> rows;
     if (!database_.query(std::string(JOB_SELECT) + whereClause + " LIMIT 1",
                          rows, error)) {
         return false;
     }
-    if (rows.empty()) return true;
+    if (rows.empty())
+        return true;
     TranscodeJob value;
-    if (!parseJob(rows.front(), value, error)) return false;
+    if (!parseJob(rows.front(), value, error))
+        return false;
     job = std::move(value);
     return true;
 }
 
-bool MySqlTranscodeRepository::enqueueForVideo(
-    const std::string& videoId,
-    const std::string& ownerAccount,
-    const std::string& requestId,
-    TranscodeJob& job,
-    std::string& error) {
+bool MySqlTranscodeRepository::enqueueForVideo(const std::string &videoId,
+                                               const std::string &ownerAccount,
+                                               const std::string &requestId,
+                                               TranscodeJob &job,
+                                               std::string &error) {
 #ifndef VOD_ENABLE_REFERENCE_RUNTIME
     (void)requestId;
 #endif
@@ -117,27 +115,31 @@ bool MySqlTranscodeRepository::enqueueForVideo(
         error = "video has no source file";
         return false;
     }
-    if (inputPath.rfind("uploads/", 0) != 0 ||
+    if ((inputPath.rfind("uploads/", 0) != 0 &&
+         inputPath.rfind("object:", 0) != 0) ||
         inputPath.find("..") != std::string::npos) {
         error = "video source is outside the managed upload directory";
         return false;
     }
     std::string input;
     std::string output;
-    const std::string outputPath = "uploads/transcoded/" + videoId + ".mp4";
+    const std::string outputPath =
+        "uploads/transcoded/" + videoId +
+        (inputPath.rfind("object:", 0) == 0 ? "/index.m3u8" : ".mp4");
     if (!database_.escape(inputPath, input, error) ||
         !database_.escape(outputPath, output, error)) {
         return false;
     }
     const std::string jobId = "transcode-" + videoId;
     std::string escapedJob;
-    if (!database_.escape(jobId, escapedJob, error)) return false;
+    if (!database_.escape(jobId, escapedJob, error))
+        return false;
     const std::string sql =
         "INSERT INTO transcode_jobs (job_id, video_id, owner_account, "
         "input_path, output_path, status, attempts, max_attempts, "
-        "next_attempt_at) VALUES ('" + escapedJob + "', '" + video +
-        "', '" + owner + "', '" + input + "', '" + output +
-        "', 'PENDING', 0, " + std::to_string(defaultMaxAttempts_) +
+        "next_attempt_at) VALUES ('" +
+        escapedJob + "', '" + video + "', '" + owner + "', '" + input + "', '" +
+        output + "', 'PENDING', 0, " + std::to_string(defaultMaxAttempts_) +
         ", NOW())";
     if (outbox_) {
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
@@ -185,31 +187,31 @@ bool MySqlTranscodeRepository::enqueueForVideo(
     }
     std::optional<TranscodeJob> found;
     if (!readJob("video_id = '" + video + "'", found, error) || !found) {
-        if (error.empty()) error = "transcode job was not created";
+        if (error.empty())
+            error = "transcode job was not created";
         return false;
     }
     job = *found;
     return true;
 }
 
-bool MySqlTranscodeRepository::findByVideoId(
-    const std::string& videoId,
-    const std::string& ownerAccount,
-    std::optional<TranscodeJob>& job,
-    std::string& error) {
+bool MySqlTranscodeRepository::findByVideoId(const std::string &videoId,
+                                             const std::string &ownerAccount,
+                                             std::optional<TranscodeJob> &job,
+                                             std::string &error) {
     std::string video;
     std::string owner;
     if (!database_.escape(videoId, video, error) ||
-        !database_.escape(ownerAccount, owner, error)) return false;
-    return readJob("video_id = '" + video + "' AND owner_account = '" +
-                       owner + "'",
+        !database_.escape(ownerAccount, owner, error))
+        return false;
+    return readJob("video_id = '" + video + "' AND owner_account = '" + owner +
+                       "'",
                    job, error);
 }
 
-bool MySqlTranscodeRepository::retry(const std::string& videoId,
-                                     const std::string& ownerAccount,
-                                     bool& updated,
-                                     std::string& error) {
+bool MySqlTranscodeRepository::retry(const std::string &videoId,
+                                     const std::string &ownerAccount,
+                                     bool &updated, std::string &error) {
     updated = false;
     bool changed = false;
     if (!database_.executeIfChangedPrepared(
@@ -219,29 +221,31 @@ bool MySqlTranscodeRepository::retry(const std::string& videoId,
             "AND owner_account = ? AND status IN ('FAILED', 'SUCCEEDED')",
             {videoId, ownerAccount},
             "UPDATE videos SET transcode_status = 'PENDING' WHERE video_id = ?",
-            {videoId}, changed, error)) return false;
+            {videoId}, changed, error))
+        return false;
     updated = changed;
     return true;
 }
 
-bool MySqlTranscodeRepository::recoverExpired(std::string& error) {
-    return database_.executeTransaction({
-        "UPDATE transcode_jobs SET "
-        "status = IF(attempts < max_attempts, 'PENDING', 'FAILED'), "
-        "next_attempt_at = NOW(), lease_token = '', lease_until = NULL, "
-        "error_message = 'worker lease expired', "
-        "finished_at = IF(attempts < max_attempts, NULL, NOW()) "
-        "WHERE status = 'RUNNING' AND lease_until < NOW()",
-        "UPDATE videos v INNER JOIN transcode_jobs j ON j.video_id = v.video_id "
-        "SET v.transcode_status = 'FAILED' WHERE j.status = 'FAILED' AND "
-        "j.error_message = 'worker lease expired'"}, error);
+bool MySqlTranscodeRepository::recoverExpired(std::string &error) {
+    return database_.executeTransaction(
+        {"UPDATE transcode_jobs SET "
+         "status = IF(attempts < max_attempts, 'PENDING', 'FAILED'), "
+         "next_attempt_at = NOW(), lease_token = '', lease_until = NULL, "
+         "error_message = 'worker lease expired', "
+         "finished_at = IF(attempts < max_attempts, NULL, NOW()) "
+         "WHERE status = 'RUNNING' AND lease_until < NOW()",
+         "UPDATE videos v INNER JOIN transcode_jobs j ON j.video_id = "
+         "v.video_id "
+         "SET v.transcode_status = 'FAILED' WHERE j.status = 'FAILED' AND "
+         "j.error_message = 'worker lease expired'"},
+        error);
 }
 
-bool MySqlTranscodeRepository::claimNext(
-    const std::string& leaseToken,
-    int leaseSeconds,
-    std::optional<TranscodeJob>& job,
-    std::string& error) {
+bool MySqlTranscodeRepository::claimNext(const std::string &leaseToken,
+                                         int leaseSeconds,
+                                         std::optional<TranscodeJob> &job,
+                                         std::string &error) {
     job.reset();
     const int safeLease = std::max(1, leaseSeconds);
     unsigned long long affected = 0;
@@ -255,59 +259,59 @@ bool MySqlTranscodeRepository::claimNext(
         "(SELECT id FROM (SELECT id FROM transcode_jobs WHERE status = "
         "'PENDING' AND attempts < max_attempts AND next_attempt_at <= NOW() "
         "ORDER BY next_attempt_at, id LIMIT 1) AS candidate)";
-    if (!database_.executeAffectedPrepared(
-            sql, {leaseToken}, affected, error)) return false;
-    if (affected == 0) return true;
+    if (!database_.executeAffectedPrepared(sql, {leaseToken}, affected, error))
+        return false;
+    if (affected == 0)
+        return true;
     std::string token;
-    if (!database_.escape(leaseToken, token, error)) return false;
+    if (!database_.escape(leaseToken, token, error))
+        return false;
     return readJob("lease_token = '" + token + "'", job, error);
 }
 
-bool MySqlTranscodeRepository::renewLease(
-    const std::string& jobId,
-    const std::string& leaseToken,
-    int leaseSeconds,
-    bool& renewed,
-    std::string& error) {
+bool MySqlTranscodeRepository::renewLease(const std::string &jobId,
+                                          const std::string &leaseToken,
+                                          int leaseSeconds, bool &renewed,
+                                          std::string &error) {
     renewed = false;
     unsigned long long affected = 0;
     if (!database_.executeAffectedPrepared(
             "UPDATE transcode_jobs SET lease_until = DATE_ADD(NOW(), "
-            "INTERVAL " + std::to_string(std::max(1, leaseSeconds)) +
-            " SECOND) WHERE job_id = ? AND lease_token = ? "
-            "AND status = 'RUNNING'",
-            {jobId, leaseToken}, affected, error)) return false;
+            "INTERVAL " +
+                std::to_string(std::max(1, leaseSeconds)) +
+                " SECOND) WHERE job_id = ? AND lease_token = ? "
+                "AND status = 'RUNNING'",
+            {jobId, leaseToken}, affected, error))
+        return false;
     renewed = affected == 1;
     return true;
 }
 
-bool MySqlTranscodeRepository::markSucceeded(
-    const TranscodeJob& job,
-    const std::string& leaseToken,
-    bool& updated,
-    std::string& error) {
+bool MySqlTranscodeRepository::markSucceeded(const TranscodeJob &job,
+                                             const std::string &leaseToken,
+                                             bool &updated,
+                                             std::string &error) {
     updated = false;
     bool changed = false;
     if (!database_.executeIfChangedPrepared(
-            "UPDATE transcode_jobs SET status = 'SUCCEEDED', "
+            "UPDATE transcode_jobs SET status = 'SUCCEEDED', output_path = ?, "
             "lease_token = '', lease_until = NULL, finished_at = NOW(), "
             "error_message = '' "
             "WHERE job_id = ? AND lease_token = ? AND status = 'RUNNING'",
-            {job.jobId, leaseToken},
+            {job.outputPath, job.jobId, leaseToken},
             "UPDATE videos SET play_url = ?, transcode_status = 'READY' "
-            "WHERE video_id = ?", {job.outputPath, job.videoId},
-            changed, error)) return false;
+            "WHERE video_id = ?",
+            {job.outputPath, job.videoId}, changed, error))
+        return false;
     updated = changed;
     return true;
 }
 
-bool MySqlTranscodeRepository::markFailed(
-    const TranscodeJob& job,
-    const std::string& leaseToken,
-    const std::string& reason,
-    int retryDelaySeconds,
-    bool& willRetry,
-    std::string& error) {
+bool MySqlTranscodeRepository::markFailed(const TranscodeJob &job,
+                                          const std::string &leaseToken,
+                                          const std::string &reason,
+                                          int retryDelaySeconds,
+                                          bool &willRetry, std::string &error) {
     willRetry = false;
     const bool retry = job.attempts < job.maxAttempts;
     const std::string status = retry ? "PENDING" : "FAILED";
@@ -317,15 +321,16 @@ bool MySqlTranscodeRepository::markFailed(
         "UPDATE videos SET transcode_status = ? WHERE video_id = ?";
     if (!database_.executeIfChangedPrepared(
             "UPDATE transcode_jobs SET status = ?, lease_token = '', "
-                "lease_until = NULL, error_message = ?, "
-                "next_attempt_at = DATE_ADD(NOW(), INTERVAL " +
+            "lease_until = NULL, error_message = ?, "
+            "next_attempt_at = DATE_ADD(NOW(), INTERVAL " +
                 std::to_string(delay) +
                 " SECOND), finished_at = IF(? = 'FAILED', NOW(), NULL) "
                 "WHERE job_id = ? AND lease_token = ? AND status = 'RUNNING'",
             {status, reason.substr(0, 512), status, job.jobId, leaseToken},
-            followup, {status, job.videoId}, changed, error)) return false;
+            followup, {status, job.videoId}, changed, error))
+        return false;
     willRetry = changed && retry;
     return true;
 }
 
-}  // namespace svc_transcode
+} // namespace svc_transcode

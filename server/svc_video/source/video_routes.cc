@@ -9,10 +9,12 @@
 #include <cstdlib>
 namespace biteserver {
 using namespace detail;
-void registerVideoRoutes(httplib::Server& server, RouteContext context) {
-    if (!context.repositories.videos) return;
-    server.Get("/videos", [context](const httplib::Request&,
-                                  httplib::Response& response) {
+VideoHandlers makeVideoHandlers(RouteContext context) {
+    VideoHandlers handlers;
+    if (!context.repositories.videos)
+        return handlers;
+    handlers.ListVideos = [context](const httplib::Request &,
+                                    httplib::Response &response) {
         std::vector<bitevideo::Video> videos;
         std::string error;
         if (!context.repositories.videos->list(videos, error)) {
@@ -31,17 +33,16 @@ void registerVideoRoutes(httplib::Server& server, RouteContext context) {
         }
 
         Json::Value body(Json::arrayValue);
-        for (const bitevideo::Video& video : videos) {
+        for (const bitevideo::Video &video : videos) {
             body.append(bitevideo::toJson(video));
         }
         response.status = 200;
-        response.set_content(
-            biteutil::JSON::serialize(body).value_or("[]"),
-            "application/json; charset=utf-8");
-    });
+        response.set_content(biteutil::JSON::serialize(body).value_or("[]"),
+                             "application/json; charset=utf-8");
+    };
 
-    server.Post("/videos", [context](const httplib::Request& request,
-                                   httplib::Response& response) {
+    handlers.CreateVideo = [context](const httplib::Request &request,
+                                     httplib::Response &response) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -114,10 +115,10 @@ void registerVideoRoutes(httplib::Server& server, RouteContext context) {
             body["video"] = videoJson;
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    server.Post("/videos/upload", [context](const httplib::Request& request,
-                                          httplib::Response& response) {
+    handlers.UploadVideo = [context](const httplib::Request &request,
+                                     httplib::Response &response) {
         Json::Value body;
         constexpr std::size_t MAX_VIDEO_BYTES = 64 * 1024 * 1024;
         constexpr std::size_t MAX_COVER_BYTES = 10 * 1024 * 1024;
@@ -186,6 +187,74 @@ void registerVideoRoutes(httplib::Server& server, RouteContext context) {
             return;
         }
 
+        if (context.mediaStorage) {
+            // 先校验所有文件，再通过 FileService 分配对象
+            // ID。失败时回收本次已上传对象。
+            httplib::MultipartFormData cover;
+            if (request.has_file("coverFile"))
+                cover = request.get_file_value("coverFile");
+            if (!cover.content.empty() &&
+                (cover.content.size() > MAX_COVER_BYTES ||
+                 !hasAllowedAvatarSuffix(pathFileName(cover.filename)))) {
+                body["success"] = false;
+                body["message"] = "封面文件格式错误";
+                setJsonResponse(response, 200, body);
+                return;
+            }
+            bitestorage::StoredObject source, image;
+            std::string error;
+            if (!context.mediaStorage->put("videos", originalVideoName,
+                                           videoPart.content, source, error)) {
+                body["success"] = false;
+                body["message"] = "视频文件服务暂时不可用";
+                setJsonResponse(response, 503, body);
+                return;
+            }
+            auto rollback = [&] {
+                std::string ignored;
+                context.mediaStorage->remove(source.locator, ignored);
+                if (!image.locator.empty())
+                    context.mediaStorage->remove(image.locator, ignored);
+            };
+            if (!cover.content.empty() &&
+                !context.mediaStorage->put("covers",
+                                           pathFileName(cover.filename),
+                                           cover.content, image, error)) {
+                rollback();
+                body["success"] = false;
+                body["message"] = "封面文件保存失败";
+                setJsonResponse(response, 503, body);
+                return;
+            }
+            draft.playUrl = "object:" + source.locator;
+            draft.coverPath =
+                image.locator.empty() ? "" : "object:" + image.locator;
+            if (!cover.filename.empty())
+                draft.coverFileName = pathFileName(cover.filename);
+            std::optional<bitevideo::Video> video;
+            if (!context.repositories.videos->createVideo(draft, video,
+                                                          error) ||
+                !video) {
+                rollback();
+                body["success"] = false;
+                body["message"] = "视频发布失败";
+                setJsonResponse(response, 500, body);
+                return;
+            }
+            auto value = bitevideo::toJson(*video);
+            value["ownerAccount"] = draft.account;
+            value["videoFileName"] = draft.videoFileName;
+            value["coverFileName"] = draft.coverFileName;
+            value["storedVideoPath"] = draft.playUrl;
+            value["storedCoverPath"] = draft.coverPath;
+            value["playUrl"] = publicUploadUrl(draft.playUrl);
+            body["success"] = true;
+            body["message"] = "文件上传成功";
+            body["video"] = value;
+            setJsonResponse(response, 200, body);
+            return;
+        }
+
         std::string uploadToken;
         std::string error;
         if (!bitesession::generateSessionToken(uploadToken, error)) {
@@ -197,8 +266,8 @@ void registerVideoRoutes(httplib::Server& server, RouteContext context) {
             setJsonResponse(response, 500, body);
             return;
         }
-        const std::string uploadPrefix = safeAccountName(draft.account) +
-            "-" + uploadToken.substr(4, 32) + "-";
+        const std::string uploadPrefix = safeAccountName(draft.account) + "-" +
+                                         uploadToken.substr(4, 32) + "-";
         const std::filesystem::path videoPath =
             std::filesystem::path("uploads") / "videos" /
             (uploadPrefix + originalVideoName);
@@ -287,9 +356,9 @@ void registerVideoRoutes(httplib::Server& server, RouteContext context) {
             body["video"] = videoJson;
             setJsonResponse(response, 200, body);
         }
-    });
-    server.Get("/videos/detail", [context](const httplib::Request& request,
-                                         httplib::Response& response) {
+    };
+    handlers.GetDetail = [context](const httplib::Request &request,
+                                   httplib::Response &response) {
         Json::Value body;
         const std::string videoId =
             request.has_param("id") ? request.get_param_value("id") : "";
@@ -322,13 +391,14 @@ void registerVideoRoutes(httplib::Server& server, RouteContext context) {
             biteutil::JSON::serialize(body).value_or(
                 R"({"success":false,"message":"serialization error"})"),
             "application/json; charset=utf-8");
-    });
+    };
 
-    server.Get("/videos/search", [context](const httplib::Request& request,
-                                         httplib::Response& response) {
+    handlers.Search = [context](const httplib::Request &request,
+                                httplib::Response &response) {
         Json::Value body;
         const std::string keyword = request.has_param("keyword")
-            ? request.get_param_value("keyword") : "";
+                                        ? request.get_param_value("keyword")
+                                        : "";
         if (keyword.empty()) {
             body["success"] = false;
             body["message"] = "搜索关键词不能为空";
@@ -344,27 +414,27 @@ void registerVideoRoutes(httplib::Server& server, RouteContext context) {
             }
             body["success"] = false;
             body["message"] = "视频搜索暂时不可用";
-            setJsonResponse(response,
-                            error.rfind("elasticsearch unavailable:", 0) == 0
-                                ? 503
-                                : 500,
-                            body);
+            setJsonResponse(
+                response,
+                error.rfind("elasticsearch unavailable:", 0) == 0 ? 503 : 500,
+                body);
             return;
         }
 
         body["success"] = true;
         body["videos"] = Json::arrayValue;
-        for (const bitevideo::Video& video : videos) {
+        for (const bitevideo::Video &video : videos) {
             body["videos"].append(bitevideo::toJson(video));
         }
         setJsonResponse(response, 200, body);
-    });
+    };
 
-    server.Get("/videos/play-url", [context](const httplib::Request& request,
-                                           httplib::Response& response) {
+    handlers.GetPlayUrl = [context](const httplib::Request &request,
+                                    httplib::Response &response) {
         Json::Value body;
         const std::string videoId = request.has_param("videoId")
-            ? request.get_param_value("videoId") : "";
+                                        ? request.get_param_value("videoId")
+                                        : "";
         if (videoId.empty()) {
             body["success"] = false;
             body["message"] = "视频 id 不能为空";
@@ -391,15 +461,17 @@ void registerVideoRoutes(httplib::Server& server, RouteContext context) {
             body["playUrl"] = publicUploadUrl(*playUrl);
             setJsonResponse(response, 200, body);
         }
-    });
-    server.Get("/users/videos", [context](const httplib::Request& request,
-                                        httplib::Response& response) {
+    };
+    handlers.ListOwnerVideos = [context](const httplib::Request &request,
+                                         httplib::Response &response) {
         Json::Value body;
-        const std::string claimedAccount = request.has_param("account")
-            ? request.get_param_value("account") : "";
+        const std::string claimedAccount =
+            request.has_param("account") ? request.get_param_value("account")
+                                         : "";
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         if (account.empty()) {
@@ -423,76 +495,101 @@ void registerVideoRoutes(httplib::Server& server, RouteContext context) {
 
         body["success"] = true;
         body["videos"] = Json::arrayValue;
-        for (const bitevideo::Video& video : videos) {
+        for (const bitevideo::Video &video : videos) {
             body["videos"].append(bitevideo::toJson(video));
         }
         setJsonResponse(response, 200, body);
-    });
+    };
     if (context.repositories.admins) {
-    server.Get("/admin/reviews", [context](const httplib::Request& request,
-                                         httplib::Response& response) {
-        if (!requireAdministrator(request, context.enforceGatewayIdentity,
-                                  context.repositories.admins, response)) {
-            return;
-        }
-        Json::Value body;
-        std::vector<bitevideo::AdminReview> reviews;
-        std::string error;
-        if (!context.repositories.admins->adminReviews(reviews, error)) {
-            if (bitelog::g_logger) {
-                ERR("GET /admin/reviews failed: {}", error);
+        handlers.ListReviews = [context](const httplib::Request &request,
+                                         httplib::Response &response) {
+            if (!requireAdministrator(request, context.enforceGatewayIdentity,
+                                      context.repositories.admins, response)) {
+                return;
             }
-            body["success"] = false;
-            body["message"] = "审核列表暂时不可用";
-            setJsonResponse(response, 500, body);
-            return;
-        }
-
-        body["success"] = true;
-        body["reviews"] = Json::arrayValue;
-        for (const auto& review : reviews) {
-            body["reviews"].append(adminReviewToJson(review));
-        }
-        setJsonResponse(response, 200, body);
-    });
-
-    server.Post("/admin/reviews/action",
-                 [context](const httplib::Request& request,
-                        httplib::Response& response) {
-        if (!requireAdministrator(request, context.enforceGatewayIdentity,
-                                  context.repositories.admins, response)) {
-            return;
-        }
-        Json::Value body;
-        const auto payload = biteutil::JSON::unserialize(request.body);
-        if (!payload || !payload->isObject()) {
-            body["success"] = false;
-            body["message"] = "请求JSON格式错误";
-            setJsonResponse(response, 200, body);
-            return;
-        }
-
-        bool updated = false;
-        std::string error;
-        const std::string videoId = trimCopy((*payload)["videoId"].asString());
-        const std::string status = trimCopy((*payload)["status"].asString());
-        if (!context.repositories.admins->updateReviewStatus(videoId, status, updated, error)) {
-            if (bitelog::g_logger) {
-                ERR("POST /admin/reviews/action failed: {}", error);
+            Json::Value body;
+            std::vector<bitevideo::AdminReview> reviews;
+            std::string error;
+            if (!context.repositories.admins->adminReviews(reviews, error)) {
+                if (bitelog::g_logger) {
+                    ERR("GET /admin/reviews failed: {}", error);
+                }
+                body["success"] = false;
+                body["message"] = "审核列表暂时不可用";
+                setJsonResponse(response, 500, body);
+                return;
             }
-            body["success"] = false;
-            body["message"] = "审核状态更新失败";
-            setJsonResponse(response, 500, body);
-        } else if (!updated) {
-            body["success"] = false;
-            body["message"] = error.empty() ? "审核参数错误" : error;
-            setJsonResponse(response, 200, body);
-        } else {
+
             body["success"] = true;
-            body["message"] = "审核状态已更新";
+            body["reviews"] = Json::arrayValue;
+            for (const auto &review : reviews) {
+                body["reviews"].append(adminReviewToJson(review));
+            }
             setJsonResponse(response, 200, body);
-        }
-    });
+        };
+
+        handlers.ReviewVideo = [context](const httplib::Request &request,
+                                         httplib::Response &response) {
+            if (!requireAdministrator(request, context.enforceGatewayIdentity,
+                                      context.repositories.admins, response)) {
+                return;
+            }
+            Json::Value body;
+            const auto payload = biteutil::JSON::unserialize(request.body);
+            if (!payload || !payload->isObject()) {
+                body["success"] = false;
+                body["message"] = "请求JSON格式错误";
+                setJsonResponse(response, 200, body);
+                return;
+            }
+
+            bool updated = false;
+            std::string error;
+            const std::string videoId =
+                trimCopy((*payload)["videoId"].asString());
+            const std::string status =
+                trimCopy((*payload)["status"].asString());
+            if (!context.repositories.admins->updateReviewStatus(
+                    videoId, status, updated, error)) {
+                if (bitelog::g_logger) {
+                    ERR("POST /admin/reviews/action failed: {}", error);
+                }
+                body["success"] = false;
+                body["message"] = "审核状态更新失败";
+                setJsonResponse(response, 500, body);
+            } else if (!updated) {
+                body["success"] = false;
+                body["message"] = error.empty() ? "审核参数错误" : error;
+                setJsonResponse(response, 200, body);
+            } else {
+                body["success"] = true;
+                body["message"] = "审核状态已更新";
+                setJsonResponse(response, 200, body);
+            }
+        };
     }
+    return handlers;
 }
-}  // namespace biteserver
+
+void registerVideoRoutes(httplib::Server &server, RouteContext context) {
+    auto handlers = makeVideoHandlers(context);
+    if (handlers.ListVideos)
+        server.Get("/videos", std::move(handlers.ListVideos));
+    if (handlers.CreateVideo)
+        server.Post("/videos", std::move(handlers.CreateVideo));
+    if (handlers.UploadVideo)
+        server.Post("/videos/upload", std::move(handlers.UploadVideo));
+    if (handlers.GetDetail)
+        server.Get("/videos/detail", std::move(handlers.GetDetail));
+    if (handlers.Search)
+        server.Get("/videos/search", std::move(handlers.Search));
+    if (handlers.GetPlayUrl)
+        server.Get("/videos/play-url", std::move(handlers.GetPlayUrl));
+    if (handlers.ListOwnerVideos)
+        server.Get("/users/videos", std::move(handlers.ListOwnerVideos));
+    if (handlers.ListReviews)
+        server.Get("/admin/reviews", std::move(handlers.ListReviews));
+    if (handlers.ReviewVideo)
+        server.Post("/admin/reviews/action", std::move(handlers.ReviewVideo));
+}
+} // namespace biteserver

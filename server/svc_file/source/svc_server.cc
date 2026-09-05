@@ -1,6 +1,5 @@
 #include "svc_server.h"
 #include "svc_data.h"
-#include "svc_sync.h"
 
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
@@ -8,6 +7,7 @@
 #include "../../common/util.h"
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
 #include "../../common/brpc_http_bridge.h"
+#include "native_rpc.h"
 #include "../../common/etcd_registry.h"
 #endif
 
@@ -22,9 +22,8 @@
 
 namespace {
 
-void setJsonResponse(httplib::Response& response,
-                     int status,
-                     const Json::Value& body) {
+void setJsonResponse(httplib::Response &response, int status,
+                     const Json::Value &body) {
     response.status = status;
     response.set_content(
         biteutil::JSON::serialize(body).value_or(
@@ -32,8 +31,8 @@ void setJsonResponse(httplib::Response& response,
         "application/json; charset=utf-8");
 }
 
-void registerRoutes(httplib::Server& server,
-                    const svc_file::FileDataFacade& data,
+void registerRoutes(httplib::Server &server,
+                    const svc_file::FileDataFacade &data,
                     bool mountLocalUploads) {
     if (mountLocalUploads) {
         std::error_code ignored;
@@ -41,24 +40,24 @@ void registerRoutes(httplib::Server& server,
         server.set_mount_point("/uploads", "uploads");
     }
 
-    server.Get("/health", [](const httplib::Request&,
-                             httplib::Response& response) {
-        Json::Value body;
-        body["code"] = 0;
-        body["message"] = "ok";
-        body["data"]["status"] = "UP";
-        setJsonResponse(response, 200, body);
-    });
-    server.Get("/healthz", [](const httplib::Request&,
-                              httplib::Response& response) {
-        Json::Value body;
-        body["success"] = true;
-        body["service"] = "file_service";
-        body["status"] = "ok";
-        setJsonResponse(response, 200, body);
-    });
-    server.Post("/files/upload", [&data](const httplib::Request& request,
-                                    httplib::Response& response) {
+    server.Get("/health",
+               [](const httplib::Request &, httplib::Response &response) {
+                   Json::Value body;
+                   body["code"] = 0;
+                   body["message"] = "ok";
+                   body["data"]["status"] = "UP";
+                   setJsonResponse(response, 200, body);
+               });
+    server.Get("/healthz",
+               [](const httplib::Request &, httplib::Response &response) {
+                   Json::Value body;
+                   body["success"] = true;
+                   body["service"] = "file_service";
+                   body["status"] = "ok";
+                   setJsonResponse(response, 200, body);
+               });
+    server.Post("/files/upload", [&data](const httplib::Request &request,
+                                         httplib::Response &response) {
         Json::Value body;
         if (!request.is_multipart_form_data() || !request.has_file("file")) {
             body["success"] = false;
@@ -79,7 +78,8 @@ void registerRoutes(httplib::Server& server,
                                     stored, error)) {
             body["success"] = false;
             body["message"] = error.empty() ? "文件保存失败" : error;
-            const int status = error == "文件不能为空或超过大小限制" ? 200 : 500;
+            const int status =
+                error == "文件不能为空或超过大小限制" ? 200 : 500;
             setJsonResponse(response, status, body);
             return;
         }
@@ -95,20 +95,21 @@ void registerRoutes(httplib::Server& server,
         setJsonResponse(response, 200, body);
     });
 
-    server.Get(R"(/uploads/(.+))", [&data](const httplib::Request& request,
-                                             httplib::Response& response) {
+    server.Get(R"(/uploads/(.+))", [&data](const httplib::Request &request,
+                                           httplib::Response &response) {
         if (request.matches.size() < 2) {
             response.status = 404;
             return;
         }
         std::string content;
         std::string error;
-        if (!data.downloadStoredFile(request.matches[1].str(), content, error)) {
+        if (!data.downloadStoredFile(request.matches[1].str(), content,
+                                     error)) {
             Json::Value body;
             body["success"] = false;
             body["message"] = error.empty() ? "文件不存在" : error;
-            setJsonResponse(response, error == "local object not found" ? 404 : 503,
-                            body);
+            setJsonResponse(
+                response, error == "local object not found" ? 404 : 503, body);
             return;
         }
         response.status = 200;
@@ -116,11 +117,11 @@ void registerRoutes(httplib::Server& server,
     });
 }
 
-}  // namespace
+} // namespace
 
 namespace svc_file {
 
-FileServerBuilder& FileServerBuilder::withConfigPath(std::string configPath) {
+FileServerBuilder &FileServerBuilder::withConfigPath(std::string configPath) {
     configPath_ = std::move(configPath);
     return *this;
 }
@@ -135,12 +136,34 @@ int FileServerBuilder::start() const {
 
     bitelog::bitelog_init(settings->log);
 
+    httplib::Server server;
+    server.set_payload_max_length(80 * 1024 * 1024);
+
+    std::unique_ptr<bitestorage::IObjectStorage> storage;
+    std::unique_ptr<bitestorage::IObjectStorage> legacyStorage;
 #ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    if (settings->fastdfs.enabled) {
+        storage = bitestorage::makeFastDfsObjectStorage(settings->fastdfs);
+        legacyStorage = bitestorage::makeLocalObjectStorage("uploads");
+    }
+#endif
+    if (!storage)
+        storage = bitestorage::makeLocalObjectStorage("uploads");
+    const std::string publicPrefix = settings->fastdfs.publicPathPrefix.empty()
+                                         ? "/uploads"
+                                         : settings->fastdfs.publicPathPrefix;
+    FileDataFacade data(*storage, publicPrefix, legacyStorage.get());
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    NativeFileService nativeService(data, *storage);
     std::unique_ptr<biterpc::BrpcHttpBridge> rpcBridge;
     if (settings->rpc.enabled) {
         rpcBridge = std::make_unique<biterpc::BrpcHttpBridge>(
             "http://127.0.0.1:" + std::to_string(settings->server.port),
             settings->rpc.fileTimeoutMs);
+        if (!rpcBridge->addService(nativeService, error)) {
+            ERR("file RPC registration failed: {}", error);
+            return 1;
+        }
         if (!rpcBridge->start(settings->rpc.bindHost, settings->rpc.port,
                               error)) {
             ERR("file_service brpc startup failed: {}", error);
@@ -151,11 +174,10 @@ int FileServerBuilder::start() const {
     if (settings->registry.enabled) {
         bitesvc::ServiceEndpoint endpoint{
             "file_service",
-            "http://127.0.0.1:" + std::to_string(
-                settings->rpc.enabled ? settings->rpc.port
-                                      : settings->server.port),
-            "",
-            settings->rpc.enabled ? "brpc" : "http"};
+            "http://127.0.0.1:" + std::to_string(settings->rpc.enabled
+                                                     ? settings->rpc.port
+                                                     : settings->server.port),
+            "", settings->rpc.enabled ? "brpc" : "http"};
         serviceProvider = std::make_unique<bitesvc::EtcdServiceProvider>(
             settings->registry, "file_service", std::move(endpoint));
         if (!serviceProvider->start(error)) {
@@ -164,27 +186,9 @@ int FileServerBuilder::start() const {
         }
     }
 #endif
-
-    httplib::Server server;
-    server.set_payload_max_length(80 * 1024 * 1024);
-    CacheDelete cacheDelete;
-    (void)cacheDelete;
-
-    std::unique_ptr<bitestorage::IObjectStorage> storage;
-    std::unique_ptr<bitestorage::IObjectStorage> legacyStorage;
-#ifdef VOD_ENABLE_REFERENCE_RUNTIME
-    if (settings->fastdfs.enabled) {
-        storage = bitestorage::makeFastDfsObjectStorage(settings->fastdfs);
-        legacyStorage = bitestorage::makeLocalObjectStorage("uploads");
-    }
-#endif
-    if (!storage) storage = bitestorage::makeLocalObjectStorage("uploads");
-    const std::string publicPrefix = settings->fastdfs.publicPathPrefix.empty()
-        ? "/uploads" : settings->fastdfs.publicPathPrefix;
-    FileDataFacade data(*storage, publicPrefix, legacyStorage.get());
     registerRoutes(server, data, !settings->fastdfs.enabled);
 
-    const char* httpHost = settings->rpc.enabled ? "127.0.0.1" : "0.0.0.0";
+    const char *httpHost = settings->rpc.enabled ? "127.0.0.1" : "0.0.0.0";
     INF("file_service listening on {}:{}", httpHost, settings->server.port);
     if (!server.listen(httpHost, settings->server.port)) {
         ERR("file_service failed to listen on port {}", settings->server.port);
@@ -193,4 +197,4 @@ int FileServerBuilder::start() const {
     return 0;
 }
 
-}  // namespace svc_file
+} // namespace svc_file

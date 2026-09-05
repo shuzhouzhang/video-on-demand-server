@@ -9,18 +9,23 @@
 #include <cstdlib>
 namespace biteserver {
 using namespace detail;
-void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
-    if (!context.repositories.interactions) return;
-    server.Get("/videos/like-status", [context](const httplib::Request& request,
-                                              httplib::Response& response) {
+InteractionHandlers makeInteractionHandlers(RouteContext context) {
+    InteractionHandlers handlers;
+    if (!context.repositories.interactions)
+        return handlers;
+    handlers.GetLike = [context](const httplib::Request &request,
+                                 httplib::Response &response) {
         Json::Value body;
         const std::string videoId = request.has_param("videoId")
-            ? request.get_param_value("videoId") : "";
-        const std::string claimedAccount = request.has_param("account")
-            ? request.get_param_value("account") : "";
+                                        ? request.get_param_value("videoId")
+                                        : "";
+        const std::string claimedAccount =
+            request.has_param("account") ? request.get_param_value("account")
+                                         : "";
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         if (account.empty()) {
@@ -35,7 +40,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
 
         std::optional<bitevideo::LikeStatus> status;
         std::string error;
-        if (!context.repositories.interactions->likeStatus(videoId, account, status, error)) {
+        if (!context.repositories.interactions->likeStatus(videoId, account,
+                                                           status, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/like-status failed: {}", error);
             }
@@ -52,11 +58,11 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
             body["likeCount"] = status->likeCount;
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    const auto changeLike = [context](const httplib::Request& request,
-                                   httplib::Response& response,
-                                   bool shouldLike) {
+    const auto changeLike = [context](const httplib::Request &request,
+                                      httplib::Response &response,
+                                      bool shouldLike) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -70,7 +76,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
         const std::string claimedAccount = (*payload)["account"].asString();
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         if (account.empty()) {
@@ -85,7 +92,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
 
         std::optional<bitevideo::LikeStatus> status;
         std::string error;
-        if (!context.repositories.interactions->setLiked(videoId, account, shouldLike, status, error)) {
+        if (!context.repositories.interactions->setLiked(
+                videoId, account, shouldLike, status, error)) {
             if (bitelog::g_logger) {
                 ERR("video like change failed: {}", error);
             }
@@ -104,28 +112,28 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
         }
     };
 
-    server.Post("/videos/like",
-                 [changeLike](const httplib::Request& request,
-                              httplib::Response& response) {
-                     changeLike(request, response, true);
-                 });
-    server.Post("/videos/unlike",
-                 [changeLike](const httplib::Request& request,
-                              httplib::Response& response) {
-                     changeLike(request, response, false);
-                 });
+    handlers.Like = [changeLike](const httplib::Request &request,
+                                 httplib::Response &response) {
+        changeLike(request, response, true);
+    };
+    handlers.Unlike = [changeLike](const httplib::Request &request,
+                                   httplib::Response &response) {
+        changeLike(request, response, false);
+    };
 
-    server.Get("/videos/watch-progress",
-                [context](const httplib::Request& request,
-                       httplib::Response& response) {
+    handlers.GetProgress = [context](const httplib::Request &request,
+                                     httplib::Response &response) {
         Json::Value body;
         const std::string videoId = request.has_param("videoId")
-            ? request.get_param_value("videoId") : "";
-        const std::string claimedAccount = request.has_param("account")
-            ? request.get_param_value("account") : "";
+                                        ? request.get_param_value("videoId")
+                                        : "";
+        const std::string claimedAccount =
+            request.has_param("account") ? request.get_param_value("account")
+                                         : "";
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         if (account.empty()) {
@@ -140,7 +148,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
 
         std::optional<bitevideo::WatchProgress> progress;
         std::string error;
-        if (!context.repositories.interactions->watchProgress(videoId, account, progress, error)) {
+        if (!context.repositories.interactions->watchProgress(
+                videoId, account, progress, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/watch-progress failed: {}", error);
             }
@@ -157,11 +166,10 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
             body["message"] = "读取成功";
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    server.Post("/videos/watch-progress",
-                 [context](const httplib::Request& request,
-                        httplib::Response& response) {
+    handlers.SaveProgress = [context](const httplib::Request &request,
+                                      httplib::Response &response) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -175,7 +183,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
         const std::string claimedAccount = (*payload)["account"].asString();
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         if (account.empty()) {
@@ -187,7 +196,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
             setJsonResponse(response, 200, body);
             return;
         }
-        if (!(*payload)["seconds"].isInt() || (*payload)["seconds"].asInt() < 0) {
+        if (!(*payload)["seconds"].isInt() ||
+            (*payload)["seconds"].asInt() < 0) {
             body["success"] = false;
             body["message"] = "播放秒数非法";
             setJsonResponse(response, 200, body);
@@ -197,7 +207,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
         std::optional<bitevideo::WatchProgress> progress;
         std::string error;
         if (!context.repositories.interactions->saveWatchProgress(
-                videoId, account, (*payload)["seconds"].asInt(), progress, error)) {
+                videoId, account, (*payload)["seconds"].asInt(), progress,
+                error)) {
             if (bitelog::g_logger) {
                 ERR("POST /videos/watch-progress failed: {}", error);
             }
@@ -214,19 +225,21 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
             body["message"] = "保存成功";
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    server.Get("/videos/favorite-status",
-                [context](const httplib::Request& request,
-                       httplib::Response& response) {
+    handlers.GetFavorite = [context](const httplib::Request &request,
+                                     httplib::Response &response) {
         Json::Value body;
         const std::string videoId = request.has_param("videoId")
-            ? request.get_param_value("videoId") : "";
-        const std::string claimedAccount = request.has_param("account")
-            ? request.get_param_value("account") : "";
+                                        ? request.get_param_value("videoId")
+                                        : "";
+        const std::string claimedAccount =
+            request.has_param("account") ? request.get_param_value("account")
+                                         : "";
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         if (videoId.empty() || account.empty()) {
@@ -238,7 +251,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
 
         std::optional<bitevideo::FavoriteStatus> status;
         std::string error;
-        if (!context.repositories.interactions->favoriteStatus(videoId, account, status, error)) {
+        if (!context.repositories.interactions->favoriteStatus(videoId, account,
+                                                               status, error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/favorite-status failed: {}", error);
             }
@@ -254,11 +268,11 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
             body["favorited"] = status->favorited;
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    const auto changeFavorite = [context](const httplib::Request& request,
-                                       httplib::Response& response,
-                                       bool shouldFavorite) {
+    const auto changeFavorite = [context](const httplib::Request &request,
+                                          httplib::Response &response,
+                                          bool shouldFavorite) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -272,7 +286,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
         const std::string claimedAccount = (*payload)["account"].asString();
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         if (videoId.empty()) {
@@ -309,25 +324,25 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
         }
     };
 
-    server.Post("/videos/favorite",
-                 [changeFavorite](const httplib::Request& request,
-                                  httplib::Response& response) {
-                     changeFavorite(request, response, true);
-                 });
-    server.Post("/videos/unfavorite",
-                 [changeFavorite](const httplib::Request& request,
-                                  httplib::Response& response) {
-                     changeFavorite(request, response, false);
-                 });
+    handlers.Favorite = [changeFavorite](const httplib::Request &request,
+                                         httplib::Response &response) {
+        changeFavorite(request, response, true);
+    };
+    handlers.Unfavorite = [changeFavorite](const httplib::Request &request,
+                                           httplib::Response &response) {
+        changeFavorite(request, response, false);
+    };
 
-    server.Get("/users/favorites", [context](const httplib::Request& request,
-                                           httplib::Response& response) {
+    handlers.ListFavorites = [context](const httplib::Request &request,
+                                       httplib::Response &response) {
         Json::Value body;
-        const std::string claimedAccount = request.has_param("account")
-            ? request.get_param_value("account") : "";
+        const std::string claimedAccount =
+            request.has_param("account") ? request.get_param_value("account")
+                                         : "";
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         if (account.empty()) {
@@ -339,7 +354,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
 
         std::vector<bitevideo::Video> videos;
         std::string error;
-        if (!context.repositories.interactions->favoriteVideos(account, videos, error)) {
+        if (!context.repositories.interactions->favoriteVideos(account, videos,
+                                                               error)) {
             if (bitelog::g_logger) {
                 ERR("GET /users/favorites failed: {}", error);
             }
@@ -351,13 +367,13 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
 
         body["success"] = true;
         body["videos"] = Json::arrayValue;
-        for (const bitevideo::Video& video : videos) {
+        for (const bitevideo::Video &video : videos) {
             body["videos"].append(bitevideo::toJson(video));
         }
         setJsonResponse(response, 200, body);
-    });
-    server.Get("/videos/comments", [context](const httplib::Request& request,
-                                           httplib::Response& response) {
+    };
+    handlers.ListComments = [context](const httplib::Request &request,
+                                      httplib::Response &response) {
         Json::Value body;
         std::string authenticatedAccount;
         if (!bindProtectedAccount(request, "", context.enforceGatewayIdentity,
@@ -365,7 +381,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
             return;
         }
         const std::string videoId = request.has_param("videoId")
-            ? request.get_param_value("videoId") : "";
+                                        ? request.get_param_value("videoId")
+                                        : "";
         if (videoId.empty()) {
             body["success"] = false;
             body["message"] = "视频 id 不能为空";
@@ -375,7 +392,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
 
         std::optional<std::vector<bitevideo::VideoComment>> comments;
         std::string error;
-        if (!context.repositories.interactions->comments(videoId, comments, error)) {
+        if (!context.repositories.interactions->comments(videoId, comments,
+                                                         error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/comments failed: {}", error);
             }
@@ -389,15 +407,15 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
         } else {
             body["success"] = true;
             body["comments"] = Json::arrayValue;
-            for (const auto& comment : *comments) {
+            for (const auto &comment : *comments) {
                 body["comments"].append(commentToJson(comment));
             }
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    server.Post("/videos/comments", [context](const httplib::Request& request,
-                                            httplib::Response& response) {
+    handlers.AddComment = [context](const httplib::Request &request,
+                                    httplib::Response &response) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -412,7 +430,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
         const std::string claimedAccount = (*payload)["account"].asString();
         std::string account;
         if (!bindProtectedAccount(request, claimedAccount,
-                                  context.enforceGatewayIdentity, response, account)) {
+                                  context.enforceGatewayIdentity, response,
+                                  account)) {
             return;
         }
         if (!useAuthenticatedUserName(context.repositories, account,
@@ -460,10 +479,10 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
             body["comment"] = commentToJson(*comment);
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    server.Get("/videos/barrages", [context](const httplib::Request& request,
-                                           httplib::Response& response) {
+    handlers.ListBarrages = [context](const httplib::Request &request,
+                                      httplib::Response &response) {
         Json::Value body;
         std::string authenticatedAccount;
         if (!bindProtectedAccount(request, "", context.enforceGatewayIdentity,
@@ -471,7 +490,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
             return;
         }
         const std::string videoId = request.has_param("videoId")
-            ? request.get_param_value("videoId") : "";
+                                        ? request.get_param_value("videoId")
+                                        : "";
         if (videoId.empty()) {
             body["success"] = false;
             body["message"] = "视频标识不能为空";
@@ -481,7 +501,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
 
         std::optional<std::vector<bitevideo::VideoBarrage>> barrages;
         std::string error;
-        if (!context.repositories.interactions->barrages(videoId, barrages, error)) {
+        if (!context.repositories.interactions->barrages(videoId, barrages,
+                                                         error)) {
             if (bitelog::g_logger) {
                 ERR("GET /videos/barrages failed: {}", error);
             }
@@ -495,15 +516,15 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
         } else {
             body["success"] = true;
             body["barrages"] = Json::arrayValue;
-            for (const auto& barrage : *barrages) {
+            for (const auto &barrage : *barrages) {
                 body["barrages"].append(barrageToJson(barrage));
             }
             setJsonResponse(response, 200, body);
         }
-    });
+    };
 
-    server.Post("/videos/barrages", [context](const httplib::Request& request,
-                                            httplib::Response& response) {
+    handlers.AddBarrage = [context](const httplib::Request &request,
+                                    httplib::Response &response) {
         Json::Value body;
         const auto payload = biteutil::JSON::unserialize(request.body);
         if (!payload || !payload->isObject()) {
@@ -514,9 +535,9 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
         }
 
         std::string authenticatedAccount;
-        if (!bindProtectedAccount(
-                request, (*payload)["account"].asString(),
-                context.enforceGatewayIdentity, response, authenticatedAccount)) {
+        if (!bindProtectedAccount(request, (*payload)["account"].asString(),
+                                  context.enforceGatewayIdentity, response,
+                                  authenticatedAccount)) {
             return;
         }
 
@@ -528,7 +549,8 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
             setJsonResponse(response, 200, body);
             return;
         }
-        if (!(*payload)["seconds"].isInt() || (*payload)["seconds"].asInt() < 0) {
+        if (!(*payload)["seconds"].isInt() ||
+            (*payload)["seconds"].asInt() < 0) {
             body["success"] = false;
             body["message"] = "弹幕时间非法";
             setJsonResponse(response, 200, body);
@@ -541,13 +563,13 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
             return;
         }
 
-        const std::string clippedText = utf8CharCount(text) > 30
-            ? utf8Prefix(text, 30) : text;
+        const std::string clippedText =
+            utf8CharCount(text) > 30 ? utf8Prefix(text, 30) : text;
         std::optional<bitevideo::VideoBarrage> barrage;
         std::string error;
         if (!context.repositories.interactions->addBarrage(
-                videoId, (*payload)["seconds"].asInt(), clippedText,
-                barrage, error)) {
+                videoId, (*payload)["seconds"].asInt(), clippedText, barrage,
+                error)) {
             if (bitelog::g_logger) {
                 ERR("POST /videos/barrages failed: {}", error);
             }
@@ -565,6 +587,37 @@ void registerInteractionRoutes(httplib::Server& server, RouteContext context) {
             body["text"] = barrage->text;
             setJsonResponse(response, 200, body);
         }
-    });
+    };
+    return handlers;
 }
-}  // namespace biteserver
+
+void registerInteractionRoutes(httplib::Server &server, RouteContext context) {
+    auto handlers = makeInteractionHandlers(context);
+    if (handlers.GetLike)
+        server.Get("/videos/like-status", std::move(handlers.GetLike));
+    if (handlers.Like)
+        server.Post("/videos/like", std::move(handlers.Like));
+    if (handlers.Unlike)
+        server.Post("/videos/unlike", std::move(handlers.Unlike));
+    if (handlers.GetProgress)
+        server.Get("/videos/watch-progress", std::move(handlers.GetProgress));
+    if (handlers.SaveProgress)
+        server.Post("/videos/watch-progress", std::move(handlers.SaveProgress));
+    if (handlers.GetFavorite)
+        server.Get("/videos/favorite-status", std::move(handlers.GetFavorite));
+    if (handlers.Favorite)
+        server.Post("/videos/favorite", std::move(handlers.Favorite));
+    if (handlers.Unfavorite)
+        server.Post("/videos/unfavorite", std::move(handlers.Unfavorite));
+    if (handlers.ListFavorites)
+        server.Get("/users/favorites", std::move(handlers.ListFavorites));
+    if (handlers.ListComments)
+        server.Get("/videos/comments", std::move(handlers.ListComments));
+    if (handlers.AddComment)
+        server.Post("/videos/comments", std::move(handlers.AddComment));
+    if (handlers.ListBarrages)
+        server.Get("/videos/barrages", std::move(handlers.ListBarrages));
+    if (handlers.AddBarrage)
+        server.Post("/videos/barrages", std::move(handlers.AddBarrage));
+}
+} // namespace biteserver

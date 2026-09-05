@@ -1,0 +1,473 @@
+syntax = "proto2";
+package vod.business;
+import "base.proto";
+option cc_generic_services = true;
+
+message Empty {
+}
+message Account {
+  optional string account = 1;
+}
+message Credentials {
+  optional string account = 1;
+  optional string password = 2;
+}
+message Email {
+  optional string email = 1;
+}
+message EmailCredentials {
+  optional string email = 1;
+  optional string authcodeId = 2;
+  optional string authcode = 3;
+}
+message ProfileUpdate {
+  optional string account = 1;
+  optional string userName = 2;
+  optional string description = 3;
+}
+message UserAction {
+  optional string account = 1;
+  optional string action = 2;
+}
+message VideoKey {
+  optional string videoId = 1;
+  optional string account = 2;
+}
+message DetailKey {
+  optional string id = 1;
+}
+message SearchKey {
+  optional string keyword = 1;
+}
+message Progress {
+  optional string videoId = 1;
+  optional string account = 2;
+  optional int32 seconds = 3;
+}
+message CommentInput {
+  optional string videoId = 1;
+  optional string account = 2;
+  optional string userName = 3;
+  optional string content = 4;
+}
+message BarrageInput {
+  optional string videoId = 1;
+  optional string account = 2;
+  optional int32 seconds = 3;
+  optional string text = 4;
+}
+message ReviewInput {
+  optional string videoId = 1;
+  optional string status = 2;
+}
+message Draft {
+  optional string title = 1;
+  optional string account = 2;
+  optional string userName = 3;
+  optional string category = 4;
+  optional string description = 5;
+  repeated string tags = 6;
+  optional string videoFileName = 7;
+  optional string coverFileName = 8;
+  optional int32 durationSeconds = 9;
+}
+message Profile {
+  optional string account = 1;
+  optional string userName = 2;
+  optional string description = 3;
+  optional string avatarPath = 4;
+}
+message Video {
+  optional string id = 1;
+  optional string title = 2;
+  optional string userName = 3;
+  optional string date = 4;
+  optional string duration = 5;
+  optional string playCount = 6;
+  optional string likeCount = 7;
+  optional string category = 8;
+  optional string description = 9;
+  repeated string tags = 10;
+  optional string ownerAccount = 11;
+  optional string videoFileName = 12;
+  optional string coverFileName = 13;
+  optional string storedVideoPath = 14;
+  optional string storedCoverPath = 15;
+  optional string playUrl = 16;
+}
+message AdminUser {
+  optional string account = 1;
+  optional string userName = 2;
+  optional string role = 3;
+  optional string status = 4;
+  optional string createdAt = 5;
+}
+message Review {
+  optional string videoId = 1;
+  optional string title = 2;
+  optional string userId = 3;
+  optional string status = 4;
+  optional string uploadTime = 5;
+}
+message Comment {
+  optional string id = 1;
+  optional string videoId = 2;
+  optional string userName = 3;
+  optional string account = 4;
+  optional string content = 5;
+  optional string createdAt = 6;
+}
+message Barrage {
+  optional int32 seconds = 1;
+  optional string text = 2;
+}
+message UserResult {
+  optional bool success = 1;
+  optional string message = 2;
+  optional string account = 3;
+  optional string userName = 4;
+  optional string token = 5;
+  optional string authcodeId = 6;
+  optional string debugCode = 7;
+  optional Profile user = 8;
+  optional string avatarPath = 9;
+  repeated AdminUser users = 10;
+}
+message VideoResult {
+  optional bool success = 1;
+  optional string message = 2;
+  optional Video video = 3;
+  repeated Video videos = 4;
+  optional string videoId = 5;
+  optional string playUrl = 6;
+  repeated Review reviews = 7;
+}
+message InteractionResult {
+  optional bool success = 1;
+  optional string message = 2;
+  optional bool liked = 3;
+  optional string likeCount = 4;
+  optional int32 seconds = 5;
+  optional bool favorited = 6;
+  repeated Video videos = 7;
+  repeated Comment comments = 8;
+  optional Comment comment = 9;
+  repeated Barrage barrages = 10;
+  optional string text = 11;
+}
+message FilePart {
+  optional string filename = 1;
+  optional bytes content = 2;
+  optional string contentType = 3;
+}
+message LoginRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Credentials payload = 2;
+}
+message LoginResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional UserResult result = 2;
+}
+message PasswordLoginRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Credentials payload = 2;
+}
+message PasswordLoginResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional UserResult result = 2;
+}
+message SendEmailCodeRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Email payload = 2;
+}
+message SendEmailCodeResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional UserResult result = 2;
+}
+message EmailLoginRequest {
+  optional vod.api.RequestContext context = 1;
+  optional EmailCredentials payload = 2;
+}
+message EmailLoginResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional UserResult result = 2;
+}
+message LogoutRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Account payload = 2;
+}
+message LogoutResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional UserResult result = 2;
+}
+message GetProfileRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Account payload = 2;
+}
+message GetProfileResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional UserResult result = 2;
+}
+message UpdateProfileRequest {
+  optional vod.api.RequestContext context = 1;
+  optional ProfileUpdate payload = 2;
+}
+message UpdateProfileResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional UserResult result = 2;
+}
+message UploadAvatarRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Account payload = 2;
+  optional FilePart avatarFile = 3;
+}
+message UploadAvatarResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional UserResult result = 2;
+}
+message ListUsersRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Empty payload = 2;
+}
+message ListUsersResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional UserResult result = 2;
+}
+message UpdateUserRequest {
+  optional vod.api.RequestContext context = 1;
+  optional UserAction payload = 2;
+}
+message UpdateUserResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional UserResult result = 2;
+}
+service UserOperations {
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc PasswordLogin(PasswordLoginRequest) returns (PasswordLoginResponse);
+  rpc SendEmailCode(SendEmailCodeRequest) returns (SendEmailCodeResponse);
+  rpc EmailLogin(EmailLoginRequest) returns (EmailLoginResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+  rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
+  rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+  rpc UploadAvatar(UploadAvatarRequest) returns (UploadAvatarResponse);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+}
+message ListVideosRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Empty payload = 2;
+}
+message ListVideosResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional VideoResult result = 2;
+}
+message CreateVideoRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Draft payload = 2;
+}
+message CreateVideoResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional VideoResult result = 2;
+}
+message UploadVideoRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Draft payload = 2;
+  optional FilePart videoFile = 3;
+  optional FilePart coverFile = 4;
+}
+message UploadVideoResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional VideoResult result = 2;
+}
+message GetDetailRequest {
+  optional vod.api.RequestContext context = 1;
+  optional DetailKey payload = 2;
+}
+message GetDetailResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional VideoResult result = 2;
+}
+message SearchRequest {
+  optional vod.api.RequestContext context = 1;
+  optional SearchKey payload = 2;
+}
+message SearchResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional VideoResult result = 2;
+}
+message GetPlayUrlRequest {
+  optional vod.api.RequestContext context = 1;
+  optional VideoKey payload = 2;
+}
+message GetPlayUrlResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional VideoResult result = 2;
+}
+message ListOwnerVideosRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Account payload = 2;
+}
+message ListOwnerVideosResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional VideoResult result = 2;
+}
+message ListReviewsRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Empty payload = 2;
+}
+message ListReviewsResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional VideoResult result = 2;
+}
+message ReviewVideoRequest {
+  optional vod.api.RequestContext context = 1;
+  optional ReviewInput payload = 2;
+}
+message ReviewVideoResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional VideoResult result = 2;
+}
+service VideoOperations {
+  rpc ListVideos(ListVideosRequest) returns (ListVideosResponse);
+  rpc CreateVideo(CreateVideoRequest) returns (CreateVideoResponse);
+  rpc UploadVideo(UploadVideoRequest) returns (UploadVideoResponse);
+  rpc GetDetail(GetDetailRequest) returns (GetDetailResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc GetPlayUrl(GetPlayUrlRequest) returns (GetPlayUrlResponse);
+  rpc ListOwnerVideos(ListOwnerVideosRequest) returns (ListOwnerVideosResponse);
+  rpc ListReviews(ListReviewsRequest) returns (ListReviewsResponse);
+  rpc ReviewVideo(ReviewVideoRequest) returns (ReviewVideoResponse);
+}
+message GetLikeRequest {
+  optional vod.api.RequestContext context = 1;
+  optional VideoKey payload = 2;
+}
+message GetLikeResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message LikeRequest {
+  optional vod.api.RequestContext context = 1;
+  optional VideoKey payload = 2;
+}
+message LikeResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message UnlikeRequest {
+  optional vod.api.RequestContext context = 1;
+  optional VideoKey payload = 2;
+}
+message UnlikeResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message GetProgressRequest {
+  optional vod.api.RequestContext context = 1;
+  optional VideoKey payload = 2;
+}
+message GetProgressResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message SaveProgressRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Progress payload = 2;
+}
+message SaveProgressResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message GetFavoriteRequest {
+  optional vod.api.RequestContext context = 1;
+  optional VideoKey payload = 2;
+}
+message GetFavoriteResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message FavoriteRequest {
+  optional vod.api.RequestContext context = 1;
+  optional VideoKey payload = 2;
+}
+message FavoriteResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message UnfavoriteRequest {
+  optional vod.api.RequestContext context = 1;
+  optional VideoKey payload = 2;
+}
+message UnfavoriteResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message ListFavoritesRequest {
+  optional vod.api.RequestContext context = 1;
+  optional Account payload = 2;
+}
+message ListFavoritesResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message ListCommentsRequest {
+  optional vod.api.RequestContext context = 1;
+  optional VideoKey payload = 2;
+}
+message ListCommentsResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message AddCommentRequest {
+  optional vod.api.RequestContext context = 1;
+  optional CommentInput payload = 2;
+}
+message AddCommentResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message ListBarragesRequest {
+  optional vod.api.RequestContext context = 1;
+  optional VideoKey payload = 2;
+}
+message ListBarragesResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+message AddBarrageRequest {
+  optional vod.api.RequestContext context = 1;
+  optional BarrageInput payload = 2;
+}
+message AddBarrageResponse {
+  optional vod.api.RpcStatus status = 1;
+  optional InteractionResult result = 2;
+}
+service InteractionOperations {
+  rpc GetLike(GetLikeRequest) returns (GetLikeResponse);
+  rpc Like(LikeRequest) returns (LikeResponse);
+  rpc Unlike(UnlikeRequest) returns (UnlikeResponse);
+  rpc GetProgress(GetProgressRequest) returns (GetProgressResponse);
+  rpc SaveProgress(SaveProgressRequest) returns (SaveProgressResponse);
+  rpc GetFavorite(GetFavoriteRequest) returns (GetFavoriteResponse);
+  rpc Favorite(FavoriteRequest) returns (FavoriteResponse);
+  rpc Unfavorite(UnfavoriteRequest) returns (UnfavoriteResponse);
+  rpc ListFavorites(ListFavoritesRequest) returns (ListFavoritesResponse);
+  rpc ListComments(ListCommentsRequest) returns (ListCommentsResponse);
+  rpc AddComment(AddCommentRequest) returns (AddCommentResponse);
+  rpc ListBarrages(ListBarragesRequest) returns (ListBarragesResponse);
+  rpc AddBarrage(AddBarrageRequest) returns (AddBarrageResponse);
+}
+
+message Job { optional string jobId = 1; optional string videoId = 2; optional string status = 3; optional uint32 attempts = 4; optional uint32 maxAttempts = 5; optional string error = 6; optional string note = 7; }
+message JobResult { optional bool success = 1; optional string message = 2; optional Job data = 3; }
+message SubmitJobRequest { optional vod.api.RequestContext context = 1; optional VideoKey payload = 2; }
+message SubmitJobResponse { optional vod.api.RpcStatus status = 1; optional JobResult result = 2; }
+message GetJobRequest { optional vod.api.RequestContext context = 1; optional VideoKey payload = 2; }
+message GetJobResponse { optional vod.api.RpcStatus status = 1; optional JobResult result = 2; }
+message RetryJobRequest { optional vod.api.RequestContext context = 1; optional VideoKey payload = 2; }
+message RetryJobResponse { optional vod.api.RpcStatus status = 1; optional JobResult result = 2; }
+service TranscodeOperations {
+  rpc SubmitJob(SubmitJobRequest) returns (SubmitJobResponse);
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  rpc RetryJob(RetryJobRequest) returns (RetryJobResponse);
+}

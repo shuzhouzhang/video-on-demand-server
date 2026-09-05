@@ -25,6 +25,7 @@ target_link_libraries(api_gateway PRIVATE
 if(VOD_ENABLE_REFERENCE_RUNTIME)
     target_sources(api_gateway PRIVATE
         ../common/native_rpc_client.cc
+        ../common/business_client.cc
         ../data/video.cc
         ../common/etcd_registry.cc
         ../common/brpc_http_bridge.cc

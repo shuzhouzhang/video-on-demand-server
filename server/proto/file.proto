@@ -36,7 +36,11 @@ message DownloadFileResponse {
   RpcStatus status = 5;
 }
 
+message RemoveFileRequest { string file_id = 1; }
+message RemoveFileResponse { bool success = 1; string message = 2; }
+
 service FileService {
+  rpc RemoveFile(RemoveFileRequest) returns (RemoveFileResponse);
   rpc UploadFile(UploadFileRequest) returns (UploadFileResponse);
   rpc DownloadFile(DownloadFileRequest) returns (DownloadFileResponse);
 }

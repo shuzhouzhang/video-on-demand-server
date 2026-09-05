@@ -7,6 +7,12 @@
 #include "../../common/service_registry.h"
 #include "../../common/util.h"
 
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+#include "../../common/brpc_http_bridge.h"
+#include "../../common/native_rpc_client.h"
+#include "../../common/etcd_registry.h"
+#endif
+
 #include <httplib.h>
 #include <jsoncpp/json/json.h>
 
@@ -16,6 +22,7 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -248,6 +255,51 @@ void forwardToDownstream(const GatewaySettings& settings,
         return;
     }
 
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    if (settings.discovery.rpc.enabled && downstream.protocol == "brpc") {
+        httplib::Headers rpcHeaders = headers;
+        if (request.has_header("Content-Type")) {
+            rpcHeaders.emplace("Content-Type",
+                               request.get_header_value("Content-Type"));
+        }
+        biterpc::ForwardResponse downstreamResponse;
+        std::string error;
+        const bool fileOperation = request.is_multipart_form_data() ||
+            request.path == "/files/upload" ||
+            request.path.rfind("/uploads/", 0) == 0;
+        const int timeoutMs = fileOperation
+            ? settings.discovery.rpc.fileTimeoutMs
+            : settings.discovery.rpc.timeoutMs;
+        const bool forwarded = biterpc::hasNativeRoute(request)
+            ? biterpc::forwardNative(downstream.baseUrl, timeoutMs, request,
+                authenticatedAccount, requestId, downstreamResponse, error)
+            : biterpc::forwardOverBrpc(downstream.baseUrl, timeoutMs, request, target,
+                rpcHeaders, authenticatedAccount, requestId, downstreamResponse, error);
+        if (!forwarded) {
+            Json::Value body;
+            body["success"] = false;
+            const bool timedOut = error.find("timeout") != std::string::npos ||
+                error.find("timed out") != std::string::npos;
+            body["message"] = timedOut ? "downstream service timeout"
+                                        : "downstream service unavailable";
+            logGatewayError(requestId, request.path, downstream,
+                            downstream.baseUrl, error);
+            setJsonResponse(response, timedOut ? 504 : 503, body);
+            response.set_header("X-Request-Id", requestId);
+            return;
+        }
+        response.status = downstreamResponse.status;
+        response.headers = downstreamResponse.headers;
+        response.set_header("X-Request-Id", requestId);
+        response.set_content(
+            downstreamResponse.body,
+            downstreamResponse.contentType.empty()
+                ? "application/octet-stream"
+                : downstreamResponse.contentType.c_str());
+        return;
+    }
+#endif
+
     bitehttp::DownstreamResponse downstreamResponse;
     std::string error;
     if (!client.send(request, target, headers, downstreamResponse, error)) {
@@ -306,6 +358,18 @@ int GatewayServerBuilder::start() const {
                   << error << '\n';
     }
 
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<bitesvc::EtcdServiceWatcher> serviceWatcher;
+    if (settings.discovery.registrySettings.enabled) {
+        serviceWatcher = std::make_unique<bitesvc::EtcdServiceWatcher>(
+            settings.discovery.registrySettings, settings.discovery.registry);
+        if (!serviceWatcher->start(error)) {
+            std::cerr << "api_gateway etcd 连接失败: " << error << '\n';
+            return 1;
+        }
+    }
+#endif
+
     httplib::Server server;
     server.set_payload_max_length(80 * 1024 * 1024);
     server.Get("/health", [](const httplib::Request&, httplib::Response& response) {
@@ -338,12 +402,12 @@ int GatewayServerBuilder::start() const {
             setJsonResponse(response, 404, body);
             return;
         }
-        const auto* downstream = settings.discovery.registry.find(downstreamName);
+        const auto downstream = settings.discovery.registry.resolve(downstreamName);
         if (!downstream) {
             Json::Value body;
             body["success"] = false;
             body["message"] = "downstream service not registered";
-            setJsonResponse(response, 502, body);
+            setJsonResponse(response, 503, body);
             return;
         }
         forwardToDownstream(settings, *downstream, request, response,

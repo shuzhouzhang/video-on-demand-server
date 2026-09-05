@@ -58,15 +58,18 @@ IGNORED_POST = {
 
 
 def extract_routes(source: str, method: str) -> set[str]:
-    pattern = rf'server_\.{method}\("([^"]+)"'
+    pattern = rf'server_?\.{method}\("([^"]+)"'
     return set(re.findall(pattern, source))
 
 
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
-    source = (root / "server" / "common" / "http_server.cc").read_text(
-        encoding="utf-8"
-    )
+    route_files = [root / "server/common/http_server.cc",
+                   root / "server/common/smoke_routes.cc",
+                   root / "server/svc_user/source/user_routes.cc",
+                   root / "server/svc_video/source/video_routes.cc",
+                   root / "server/svc_video/source/interaction_routes.cc"]
+    source = "\n".join(path.read_text(encoding="utf-8") for path in route_files)
 
     actual_get = extract_routes(source, "Get")
     actual_post = extract_routes(source, "Post")

@@ -12,6 +12,7 @@ import argparse
 import io
 import json
 import sys
+import time
 import urllib.parse
 import urllib.request
 import uuid
@@ -99,9 +100,14 @@ def expect(condition: bool, message: str) -> None:
     print(f"[PASS] {message}")
 
 
-def run_write_checks(base_url: str, token: str) -> None:
+def run_write_checks(
+    base_url: str,
+    token: str,
+    video_bytes: bytes | None = None,
+    wait_transcode_seconds: int = 0,
+) -> None:
     marker = f"Codex smoke write check {uuid.uuid4().hex[:8]}"
-    video_bytes = b"fake mp4 payload from smoke write checks"
+    video_bytes = video_bytes or b"fake mp4 payload from smoke write checks"
     cover_bytes = b"fake jpg payload from smoke write checks"
     avatar_bytes = b"fake png payload from smoke write checks"
     uploaded_video_id = ""
@@ -137,7 +143,10 @@ def run_write_checks(base_url: str, token: str) -> None:
             },
             token,
         )
-        expect(isinstance(upload, dict) and upload.get("success") is True, "POST /videos/upload accepts video bytes")
+        expect(
+            isinstance(upload, dict) and upload.get("success") is True,
+            f"POST /videos/upload accepts video bytes; response={upload}",
+        )
         video = upload.get("video", {})
         uploaded_video_id = video.get("id", "")
         stored_video_path = video.get("storedVideoPath", "")
@@ -167,6 +176,29 @@ def run_write_checks(base_url: str, token: str) -> None:
             "owner sees pending upload in /users/videos",
         )
 
+        if wait_transcode_seconds > 0:
+            deadline = time.monotonic() + wait_transcode_seconds
+            last_status = ""
+            while time.monotonic() < deadline:
+                job = request_json(
+                    base_url,
+                    "GET",
+                    f"/transcode/jobs?videoId={urllib.parse.quote(uploaded_video_id)}",
+                    token=token,
+                )
+                last_status = str(job.get("data", {}).get("status", ""))
+                if last_status == "SUCCEEDED":
+                    break
+                if last_status == "FAILED":
+                    raise AssertionError(
+                        f"RabbitMQ-driven transcode failed: {job.get('data', {})}"
+                    )
+                time.sleep(0.5)
+            expect(
+                last_status == "SUCCEEDED",
+                "RabbitMQ event drives transcode job to SUCCEEDED",
+            )
+
         avatar = multipart_request_json(
             base_url,
             "/users/avatar",
@@ -188,13 +220,14 @@ def run_write_checks(base_url: str, token: str) -> None:
             "avatarPath": avatar_path,
             "previousAvatarPath": previous_avatar_path,
         }
-        cleanup = request_json(
-            base_url, "POST", "/__smoke-cleanup", cleanup_payload, token=token
-        )
-        if isinstance(cleanup, dict) and cleanup.get("success") is True:
-            print("[PASS] smoke write-check data cleaned")
-        else:
-            print(f"[WARN] cleanup did not complete: {cleanup}", file=sys.stderr)
+        if uploaded_video_id or avatar_path:
+            cleanup = request_json(
+                base_url, "POST", "/__smoke-cleanup", cleanup_payload, token=token
+            )
+            if isinstance(cleanup, dict) and cleanup.get("success") is True:
+                print("[PASS] smoke write-check data cleaned")
+            else:
+                print(f"[WARN] cleanup did not complete: {cleanup}", file=sys.stderr)
 
 
 def main() -> int:
@@ -208,6 +241,16 @@ def main() -> int:
         "--write-checks",
         action="store_true",
         help="also verify upload/avatar/static-resource write flows and clean up test data",
+    )
+    parser.add_argument(
+        "--transcode-video",
+        help="use a real MP4 for write checks instead of the tiny fake payload",
+    )
+    parser.add_argument(
+        "--wait-transcode-seconds",
+        type=int,
+        default=0,
+        help="wait for the uploaded video's transcode job to succeed",
     )
     args = parser.parse_args()
 
@@ -269,7 +312,16 @@ def main() -> int:
         expect(isinstance(admin_reviews, dict) and admin_reviews.get("success") is True, "GET /admin/reviews is reachable")
 
         if args.write_checks:
-            run_write_checks(base_url, token)
+            supplied_video = None
+            if args.transcode_video:
+                with open(args.transcode_video, "rb") as source:
+                    supplied_video = source.read()
+            run_write_checks(
+                base_url,
+                token,
+                supplied_video,
+                max(0, args.wait_transcode_seconds),
+            )
 
         print(f"Smoke test passed against {base_url}")
         return 0

@@ -1,11 +1,5 @@
 #include "svc_data.h"
-#include "../../common/session_token.h"
 
-#include <algorithm>
-#include <cerrno>
-#include <cctype>
-#include <cstdio>
-#include <cstring>
 #include <filesystem>
 
 namespace {
@@ -14,46 +8,20 @@ std::string pathFileName(const std::string& filename) {
     return std::filesystem::path(filename).filename().string();
 }
 
-std::string safeSegment(std::string value) {
-    for (char& ch : value) {
-        const bool safe = std::isalnum(static_cast<unsigned char>(ch)) ||
-            ch == '-' || ch == '_';
-        if (!safe) {
-            ch = '_';
-        }
-    }
-    return value.empty() ? "misc" : value;
-}
-
-bool writeBinaryFile(const std::filesystem::path& path,
-                     const std::string& content,
-                     std::string& error) {
-    std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
-    if (ec) {
-        error = "创建目录失败: " + ec.message();
-        return false;
-    }
-    std::FILE* out = std::fopen(path.string().c_str(), "wbx");
-    if (!out) {
-        error = "打开文件失败: " + std::string(std::strerror(errno));
-        return false;
-    }
-    const std::size_t written =
-        std::fwrite(content.data(), 1, content.size(), out);
-    const bool closed = std::fclose(out) == 0;
-    if (written != content.size() || !closed) {
-        std::error_code ignored;
-        std::filesystem::remove(path, ignored);
-        error = "写入文件失败: " + path.string();
-        return false;
-    }
-    return true;
-}
-
 }  // namespace
 
 namespace svc_file {
+
+FileDataFacade::FileDataFacade(bitestorage::IObjectStorage& storage,
+                               std::string publicPathPrefix,
+                               bitestorage::IObjectStorage* legacyStorage)
+    : storage_(storage),
+      legacyStorage_(legacyStorage),
+      publicPathPrefix_(std::move(publicPathPrefix)) {
+    while (publicPathPrefix_.size() > 1 && publicPathPrefix_.back() == '/') {
+        publicPathPrefix_.pop_back();
+    }
+}
 
 bool FileDataFacade::storeUploadedFile(const std::string& directory,
                                        const std::string& filename,
@@ -67,25 +35,34 @@ bool FileDataFacade::storeUploadedFile(const std::string& directory,
         return false;
     }
 
-    const std::string safeDirectory = safeSegment(directory);
-    const std::filesystem::path originalPath(originalName);
-    const std::string extension = originalPath.extension().string();
-    const std::string safeName = safeSegment(originalPath.stem().string()) +
-        extension;
-    std::string uploadToken;
-    if (!bitesession::generateSessionToken(uploadToken, error)) return false;
-    const std::string prefix = uploadToken.substr(4, 32) + "-" + safeName;
-    const std::filesystem::path storedPath =
-        std::filesystem::path("uploads") / safeDirectory / prefix;
-
-    if (!writeBinaryFile(storedPath, content, error)) {
+    bitestorage::StoredObject object;
+    if (!storage_.put(directory, originalName, content, object, error)) {
         return false;
     }
 
     stored.originalName = originalName;
-    stored.storedPath = storedPath.generic_string();
-    stored.publicUrl = "/" + stored.storedPath;
+    stored.storedPath = object.locator;
+    stored.publicUrl = publicPathPrefix_ + "/" + object.locator;
+    stored.storageGroup = object.storageGroup;
+    stored.remoteName = object.remoteName;
+    stored.sizeBytes = object.sizeBytes;
     return true;
+}
+
+bool FileDataFacade::downloadStoredFile(const std::string& locator,
+                                        std::string& content,
+                                        std::string& error) const {
+    if (locator.empty() || locator.find("..") != std::string::npos ||
+        locator.front() == '/') {
+        error = "invalid object locator";
+        return false;
+    }
+    const bool fastDfsLocator = locator.rfind("group", 0) == 0 &&
+        locator.find("/M") != std::string::npos;
+    if (!fastDfsLocator && legacyStorage_) {
+        return legacyStorage_->get(locator, content, error);
+    }
+    return storage_.get(locator, content, error);
 }
 
 }  // namespace svc_file

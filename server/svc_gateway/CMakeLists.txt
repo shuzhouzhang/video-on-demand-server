@@ -21,3 +21,13 @@ target_include_directories(api_gateway PRIVATE
 target_link_libraries(api_gateway PRIVATE
     jsoncpp fmt spdlog cpp-httplib hiredis OpenSSL::Crypto Threads::Threads
 )
+
+if(VOD_ENABLE_REFERENCE_RUNTIME)
+    target_sources(api_gateway PRIVATE
+        ../common/native_rpc_client.cc
+        ../data/video.cc
+        ../common/etcd_registry.cc
+        ../common/brpc_http_bridge.cc
+    )
+    target_link_libraries(api_gateway PRIVATE vod_proto vod_reference_dependencies)
+endif()

@@ -13,13 +13,44 @@
     "port": 3306,
     "user": "video_app",
     "password": "",
+    "password_file": "/home/dev/.local/opt/vod/secrets/rabbitmq_password",
     "name": "video_on_demand"
   },
   "redis": {
     "enabled": false
   },
   "auth": {
-    "enforce_gateway_identity": false
+    "enforce_gateway_identity": true
+  },
+  "rpc": {
+    "enabled": true,
+    "bind_host": "127.0.0.1",
+    "port": 11004,
+    "timeout_ms": 2000,
+    "file_timeout_ms": 120000
+  },
+  "registry": {
+    "enabled": true,
+    "endpoint": "http://127.0.0.1:2379",
+    "prefix": "/vod/services",
+    "lease_ttl_seconds": 10,
+    "keepalive_seconds": 3,
+    "refresh_interval_ms": 1000
+  },
+  "rabbitmq": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 5672,
+    "user": "video_app",
+    "password": "",
+    "password_file": "/home/dev/.local/opt/vod/secrets/rabbitmq_password",
+    "virtual_host": "/vod",
+    "max_attempts": 3
+  },
+  "fastdfs": {
+    "enabled": true,
+    "client_config": "/home/dev/.local/opt/vod/fastdfs/conf/client.conf",
+    "public_path_prefix": "/uploads"
   },
   "transcode": {
     "enabled": true,
@@ -28,7 +59,7 @@
     "lease_seconds": 300,
     "max_attempts": 3,
     "retry_delay_seconds": 30,
-    "ffmpeg_path": "ffmpeg",
+    "ffmpeg_path": "/home/dev/.local/opt/vod/ffmpeg-release/ffmpeg",
     "upload_root": "uploads",
     "output_root": "uploads/transcoded"
   }

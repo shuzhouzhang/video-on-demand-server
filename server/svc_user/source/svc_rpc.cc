@@ -1,4 +1,6 @@
 #include "svc_rpc.h"
+#include "user_routes.h"
+
 
 #include "../../common/bitelog.h"
 
@@ -18,11 +20,11 @@ int UserRpcService::listen(const std::string& host, std::uint16_t port) {
     biterepo::RepositorySet repositories;
     repositories.users = &userRepository_;
     repositories.admins = &adminRepository_;
-    biteserver::HttpServer server(repositories,
-                                  biteserver::ServiceRole::User,
-                                  "user_service",
-                                  sessions_,
-                                  enforceGatewayIdentity_);
+    const biteserver::RouteContext context{repositories, sessions_, enforceGatewayIdentity_};
+    biteserver::HttpServer server("user_service", [context](httplib::Server& http) {
+        biteserver::registerUserRoutes(http, context);
+        biteserver::registerSmokeRoutes(http, context);
+    });
     if (!server.listen(host, port)) {
         ERR("user_service failed to listen on port {}", port);
         return 1;

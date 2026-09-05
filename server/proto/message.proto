@@ -2,6 +2,28 @@ syntax = "proto3";
 
 package vod.api;
 
+option cc_generic_services = true;
+
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED = 0;
+  HLS_TRANSCODE_REQUESTED = 1;
+  FILE_DELETE_REQUESTED = 2;
+  CACHE_INVALIDATION_REQUESTED = 3;
+  VIDEO_INDEX_UPSERT_REQUESTED = 4;
+  VIDEO_INDEX_DELETE_REQUESTED = 5;
+}
+
+message EventEnvelope {
+  string event_id = 1;
+  EventKind kind = 2;
+  string aggregate_type = 3;
+  string aggregate_id = 4;
+  string request_id = 5;
+  int32 attempt = 6;
+  int64 created_at_unix_ms = 7;
+  bytes payload = 8;
+}
+
 message DeleteFileMessage {
   string public_url = 1;
 }
@@ -11,6 +33,11 @@ message CacheInvalidationMessage {
 }
 
 message HlsTranscodeMessage {
-  int64 video_id = 1;
+  string video_id = 1;
   string source_file = 2;
+  string output_bundle_id = 3;
+}
+
+message VideoIndexMessage {
+  string video_id = 1;
 }

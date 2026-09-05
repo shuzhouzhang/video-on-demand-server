@@ -2,6 +2,7 @@
 *.o
 *.a
 *.so
+/build/
 
 # Locally built test/example executables
 /example/spdlog/log-test.
@@ -12,6 +13,8 @@
 /test/auth/auth_test
 /test/repository/repository_test
 /test/transcode/transcode_test
+/test/outbox/outbox_test
+/test/object_storage/object_storage_test
 /video_server
 /api_gateway
 /user_service

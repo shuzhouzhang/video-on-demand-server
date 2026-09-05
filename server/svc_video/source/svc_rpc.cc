@@ -1,4 +1,7 @@
 #include "svc_rpc.h"
+#include "video_routes.h"
+#include "interaction_routes.h"
+
 
 #include "../../common/bitelog.h"
 
@@ -21,11 +24,12 @@ int VideoRpcService::listen(const std::string& host, std::uint16_t port) {
     repositories.videos = &videoRepository_;
     repositories.interactions = &interactionRepository_;
     repositories.admins = &adminRepository_;
-    biteserver::HttpServer server(repositories,
-                                  biteserver::ServiceRole::Video,
-                                  "video_service",
-                                  sessions_,
-                                  enforceGatewayIdentity_);
+    const biteserver::RouteContext context{repositories, sessions_, enforceGatewayIdentity_};
+    biteserver::HttpServer server("video_service", [context](httplib::Server& http) {
+        biteserver::registerVideoRoutes(http, context);
+        biteserver::registerInteractionRoutes(http, context);
+        biteserver::registerSmokeRoutes(http, context);
+    });
     if (!server.listen(host, port)) {
         ERR("video_service failed to listen on port {}", port);
         return 1;

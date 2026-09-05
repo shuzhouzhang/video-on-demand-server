@@ -4,37 +4,47 @@ package vod.api;
 
 import "base.proto";
 
+option cc_generic_services = true;
+
 message VideoListRequest {
   int32 page = 1;
   int32 page_size = 2;
   string keyword = 3;
+  RequestContext context = 4;
 }
 
 message VideoListResponse {
   bool success = 1;
   string message = 2;
   repeated VideoInfo videos = 3;
+  RpcStatus status = 4;
 }
 
 message VideoDetailRequest {
   int64 id = 1;
+  RequestContext context = 2;
+  string video_id = 3;
 }
 
 message VideoDetailResponse {
   bool success = 1;
   string message = 2;
   VideoInfo video = 3;
+  RpcStatus status = 4;
 }
 
 message TranscodeJobRequest {
   int64 video_id = 1;
   string file_path = 2;
+  RequestContext context = 3;
+  string event_id = 4;
 }
 
 message TranscodeJobResponse {
   bool success = 1;
   string message = 2;
   string status = 3;
+  RpcStatus rpc_status = 4;
 }
 
 service VideoService {

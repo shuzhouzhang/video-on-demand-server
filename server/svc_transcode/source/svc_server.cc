@@ -6,12 +6,21 @@
 #include "../../common/bitelog.h"
 #include "../../common/config.h"
 #include "../../common/util.h"
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+#include "../../common/brpc_http_bridge.h"
+#include "../../common/etcd_registry.h"
+#include "../../common/outbox.h"
+#include "../../common/rabbitmq_consumer.h"
+#include "../../common/rabbitmq_publisher.h"
+#include "message.pb.h"
+#endif
 #include "../../database/database.h"
 
 #include <httplib.h>
 #include <jsoncpp/json/json.h>
 
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -107,7 +116,10 @@ void registerRoutes(httplib::Server& server,
 
         svc_transcode::TranscodeJob job;
         std::string error;
-        if (!repository.enqueueForVideo(videoId, *account, job, error)) {
+        const std::string requestId = request.has_header("X-Request-Id")
+            ? request.get_header_value("X-Request-Id") : "";
+        if (!repository.enqueueForVideo(videoId, *account, requestId,
+                                        job, error)) {
             setError(response, error.find("not found") != std::string::npos
                                    ? 404
                                    : 500,
@@ -208,27 +220,127 @@ int TranscodeServerBuilder::start() const {
     }
     bitelog::bitelog_init(settings->log);
 
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<biterpc::BrpcHttpBridge> rpcBridge;
+    if (settings->rpc.enabled) {
+        rpcBridge = std::make_unique<biterpc::BrpcHttpBridge>(
+            "http://127.0.0.1:" + std::to_string(settings->server.port),
+            settings->rpc.timeoutMs);
+        if (!rpcBridge->start(settings->rpc.bindHost, settings->rpc.port,
+                              error)) {
+            ERR("transcode_service brpc startup failed: {}", error);
+            return 1;
+        }
+    }
+    std::unique_ptr<bitesvc::EtcdServiceProvider> serviceProvider;
+    if (settings->registry.enabled) {
+        bitesvc::ServiceEndpoint endpoint{
+            "transcode_service",
+            "http://127.0.0.1:" + std::to_string(
+                settings->rpc.enabled ? settings->rpc.port
+                                      : settings->server.port),
+            "",
+            settings->rpc.enabled ? "brpc" : "http"};
+        serviceProvider = std::make_unique<bitesvc::EtcdServiceProvider>(
+            settings->registry, "transcode_service", std::move(endpoint));
+        if (!serviceProvider->start(error)) {
+            ERR("transcode_service etcd registration failed: {}", error);
+            return 1;
+        }
+    }
+#endif
+
     bitedb::Database database;
     if (!database.connect(settings->database, error)) {
         ERR("transcode_service database connection failed: {}", error);
         return 1;
     }
+    biteevent::MySqlOutboxRepository* outbox = nullptr;
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<biteevent::MySqlOutboxRepository> outboxRepository;
+    std::unique_ptr<biteevent::RabbitMqPublisher> eventPublisher;
+    std::unique_ptr<biteevent::OutboxDispatcher> outboxDispatcher;
+    std::unique_ptr<biteevent::OutboxWorker> outboxWorker;
+    if (settings->rabbitmq.enabled) {
+        outboxRepository =
+            std::make_unique<biteevent::MySqlOutboxRepository>(database);
+        outbox = outboxRepository.get();
+        eventPublisher =
+            std::make_unique<biteevent::RabbitMqPublisher>(settings->rabbitmq);
+        outboxDispatcher = std::make_unique<biteevent::OutboxDispatcher>(
+            *outboxRepository, *eventPublisher, 3, 5, 10);
+        outboxWorker =
+            std::make_unique<biteevent::OutboxWorker>(*outboxDispatcher, 500);
+        outboxWorker->start();
+    }
+#endif
     MySqlTranscodeRepository repository(
-        database, static_cast<unsigned int>(settings->transcode.maxAttempts));
+        database, static_cast<unsigned int>(settings->transcode.maxAttempts),
+        outbox);
     if (!repository.recoverExpired(error)) {
         ERR("transcode_service lease recovery failed: {}", error);
         return 1;
     }
     FfmpegRunner runner(settings->transcode);
     SvcWorker worker(repository, runner, settings->transcode);
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+    std::unique_ptr<biteevent::ConsumedEventStore> consumedEvents;
+    std::unique_ptr<biteevent::RabbitMqConsumer> transcodeConsumer;
+    if (settings->transcode.enabled && settings->rabbitmq.enabled) {
+        consumedEvents =
+            std::make_unique<biteevent::ConsumedEventStore>(database);
+        transcodeConsumer = std::make_unique<biteevent::RabbitMqConsumer>(
+            settings->rabbitmq, "vod.transcode", "transcode.hls",
+            "vod.transcode.hls",
+            [&worker, store = consumedEvents.get()](
+                const biteevent::ConsumedMessage& message,
+                std::string& handlerError) {
+                vod::api::EventEnvelope envelope;
+                if (!envelope.ParseFromString(message.body) ||
+                    envelope.kind() != vod::api::HLS_TRANSCODE_REQUESTED ||
+                    envelope.event_id().empty()) {
+                    handlerError = "invalid HLS transcode event envelope";
+                    return false;
+                }
+                if (!message.eventId.empty() &&
+                    message.eventId != envelope.event_id()) {
+                    handlerError = "RabbitMQ message id does not match event envelope";
+                    return false;
+                }
+                bool alreadyProcessed = false;
+                if (!store->wasProcessed("transcode_service",
+                                         envelope.event_id(),
+                                         alreadyProcessed, handlerError)) {
+                    return false;
+                }
+                if (alreadyProcessed) return true;
+
+                bool processed = false;
+                if (!worker.processOne(processed, handlerError)) return false;
+
+                bool first = false;
+                if (!store->markIfFirst("transcode_service",
+                                        envelope.event_id(), first,
+                                        handlerError)) {
+                    return false;
+                }
+                return true;
+            });
+        transcodeConsumer->start();
+    } else if (settings->transcode.enabled) {
+        worker.start();
+    }
+#else
     if (settings->transcode.enabled) worker.start();
+#endif
 
     httplib::Server server;
     registerRoutes(server, repository,
                    settings->auth.enforceGatewayIdentity);
-    INF("transcode_service listening on 0.0.0.0:{}",
+    const char* httpHost = settings->rpc.enabled ? "127.0.0.1" : "0.0.0.0";
+    INF("transcode_service listening on {}:{}", httpHost,
         settings->server.port);
-    if (!server.listen("0.0.0.0", settings->server.port)) {
+    if (!server.listen(httpHost, settings->server.port)) {
         ERR("transcode_service failed to listen on port {}",
             settings->server.port);
         return 1;

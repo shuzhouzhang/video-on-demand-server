@@ -1,5 +1,12 @@
 #include "video_repository.h"
 
+#include "../../common/outbox.h"
+#ifdef VOD_ENABLE_REFERENCE_RUNTIME
+#include "message.pb.h"
+#endif
+
+#include "../../common/elasticsearch.h"
+
 #include "../../common/util.h"
 #include "../../common/session_token.h"
 
@@ -134,8 +141,11 @@ bool profileFromRow(const bitedb::Database::QueryRow& row,
 
 }  // namespace
 
-MySqlVideoRepository::MySqlVideoRepository(bitedb::Database& database)
-    : database_(database) {}
+MySqlVideoRepository::MySqlVideoRepository(
+    bitedb::Database& database,
+    bitesearch::IVideoSearchIndex* searchIndex,
+    biteevent::MySqlOutboxRepository* outbox)
+    : database_(database), searchIndex_(searchIndex), outbox_(outbox) {}
 
 bool MySqlVideoRepository::list(std::vector<Video>& videos,
                                 std::string& error) {
@@ -227,7 +237,43 @@ bool MySqlVideoRepository::createVideo(const VideoDraft& draft,
             "', '" + escapedVideoId + "', '" + escapedAccount + "', '" +
             escapedPlayUrl + "', '" + escapedOutput +
             "', 'PENDING', 0, 3, NOW())";
-        if (!database_.executeTransaction({sql, jobSql}, error)) return false;
+        std::vector<std::string> transaction{sql, jobSql};
+#ifndef VOD_ENABLE_REFERENCE_RUNTIME
+        if (outbox_) { error = "outbox requires reference runtime"; return false; }
+#else
+        if (outbox_) {
+            vod::api::HlsTranscodeMessage message;
+            message.set_video_id(videoId);
+            message.set_source_file(sourcePath);
+            message.set_output_bundle_id("bundle-" + videoId);
+            std::string payload;
+            if (!message.SerializeToString(&payload)) {
+                error = "failed to serialize transcode message";
+                return false;
+            }
+            biteevent::OutboxEvent event;
+            event.eventId = biteutil::Random::code(32);
+            event.exchange = "vod.transcode";
+            event.routingKey = "transcode.hls";
+            event.eventType = "HLS_TRANSCODE_REQUESTED";
+            event.aggregateType = "video";
+            event.aggregateId = videoId;
+            vod::api::EventEnvelope envelope;
+            envelope.set_event_id(event.eventId);
+            envelope.set_kind(vod::api::HLS_TRANSCODE_REQUESTED);
+            envelope.set_aggregate_type("video");
+            envelope.set_aggregate_id(videoId);
+            envelope.set_payload(payload);
+            if (!envelope.SerializeToString(&event.payload)) {
+                error = "failed to serialize transcode event";
+                return false;
+            }
+            std::string outboxSql;
+            if (!outbox_->buildInsertSql(event, outboxSql, error)) return false;
+            transaction.push_back(std::move(outboxSql));
+        }
+#endif
+        if (!database_.executeTransaction(transaction, error)) return false;
     } else if (!database_.execute(sql, error)) {
         return false;
     }
@@ -292,6 +338,19 @@ bool MySqlVideoRepository::search(const std::string& keyword,
                                   std::vector<Video>& videos,
                                   std::string& error) {
     videos.clear();
+    if (searchIndex_) {
+        std::vector<std::string> ids;
+        if (!searchIndex_->searchIds(keyword, ids, error)) {
+            error = "elasticsearch unavailable: " + error;
+            return false;
+        }
+        for (const auto& id : ids) {
+            std::optional<Video> video;
+            if (!findById(id, video, error)) return false;
+            if (video) videos.push_back(std::move(*video));
+        }
+        return true;
+    }
     std::string escapedKeyword;
     if (!database_.escape(keyword, escapedKeyword, error)) {
         return false;

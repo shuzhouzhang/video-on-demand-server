@@ -15,9 +15,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential default-libmysqlclient-dev libcpp-httplib-dev \
             libfmt-dev libhiredis-dev libjsoncpp-dev libodb-dev \
-            libodb-mysql-dev libspdlog-dev libssl-dev python3
+            libodb-mysql-dev libspdlog-dev libssl-dev python3 cmake
       - name: Build services
-        run: make -j2 microservices
+        run: |
+          cmake -S server -B build/ci -DVOD_ENABLE_REFERENCE_RUNTIME=OFF
+          cmake --build build/ci --parallel 2
       - name: Auth tests
         run: make -C test/auth test
       - name: HTTP contract and identity tests

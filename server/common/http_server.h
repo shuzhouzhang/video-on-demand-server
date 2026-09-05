@@ -6,7 +6,7 @@
 #include "../repository/repository.h"
 
 #include <cstdint>
-#include <memory>
+#include <functional>
 #include <string>
 
 #include <httplib.h>
@@ -27,6 +27,8 @@ enum class ServiceRole {
 
 class HttpServer {
 public:
+    using RouteRegistrar = std::function<void(httplib::Server&)>;
+    HttpServer(std::string serviceName, const RouteRegistrar& registrar);
     explicit HttpServer(biterepo::RepositorySet repositories);
     HttpServer(biterepo::RepositorySet repositories, ServiceRole role,
                std::string serviceName);
@@ -44,15 +46,10 @@ public:
     void stop();
 
 private:
-    void registerRoutes();
     void registerHealthRoutes();
 
     httplib::Server server_;
-    biterepo::RepositorySet repositories_;
-    ServiceRole role_;
     std::string serviceName_;
-    bitesession::RedisSessionManager* sessionManager_;
-    bool enforceGatewayIdentity_;
 };
 
 }  // namespace biteserver
